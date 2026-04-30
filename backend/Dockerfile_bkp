@@ -1,0 +1,39 @@
+FROM python:3.9-slim
+
+# Impede que o Python gere arquivos .pyc e garante logs em tempo real
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Instala dependências do sistema necessárias para Postgres e Oracle Client
+# libaio1 é essencial para o driver Thick Mode da Oracle
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    libaio1 \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- INSTALAÇÃO DO ORACLE INSTANT CLIENT ---
+WORKDIR /opt/oracle
+RUN wget https://download.oracle.com/otn_software/linux/instantclient/1922000/instantclient-basic-linux.x64-19.22.0.0.0dbru.zip && \
+    unzip instantclient-basic-linux.x64-19.22.0.0.0dbru.zip && \
+    rm -f instantclient-basic-linux.x64-19.22.0.0.0dbru.zip
+
+# Define variáveis de ambiente para o sistema encontrar as bibliotecas Oracle
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_19_22
+
+# Volta para a pasta da aplicação
+WORKDIR /app
+
+# Instala as dependências do Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia o código fonte
+COPY . .
+
+# Porta da API
+EXPOSE 8000
+
+# O comando de execução é definido no docker-compose.yml

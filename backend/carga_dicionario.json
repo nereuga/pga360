@@ -1,0 +1,89 @@
+{
+  "sinonimos": {
+    "data_green_light": {
+      "campo_tecnico": "data_green_light",
+      "termos": [
+        {"termo": "green light", "peso": 10},
+        {"termo": "liberação aduaneira", "peso": 9},
+        {"termo": "luz verde", "peso": 8},
+        {"termo": "autorização para embarque", "peso": 7}
+      ]
+    },
+    "data_atd": {
+      "campo_tecnico": "data_atd",
+      "termos": [
+        {"termo": "atd", "peso": 10},
+        {"termo": "actual time departure", "peso": 9},
+        {"termo": "saída real", "peso": 8},
+        {"termo": "data de despacho", "peso": 8},
+        {"termo": "zarpe", "peso": 8}
+      ]
+    },
+    "data_ata": {
+      "campo_tecnico": "data_ata",
+      "termos": [
+        {"termo": "ata", "peso": 10},
+        {"termo": "actual time arrival", "peso": 9},
+        {"termo": "chegada real", "peso": 8},
+        {"termo": "atracação", "peso": 7}
+      ]
+    },
+    "data_registro": {
+      "campo_tecnico": "data_registro",
+      "termos": [
+        {"termo": "registro", "peso": 10},
+        {"termo": "numeração da di", "peso": 10},
+        {"termo": "início do despacho", "peso": 9}
+      ]
+    },
+    "total_fob": {
+      "campo_tecnico": "total_fob",
+      "termos": [
+        {"termo": "valor mercadoria", "peso": 10},
+        {"termo": "fob", "peso": 10},
+        {"termo": "valor comercial", "peso": 9}
+      ]
+    }
+  },
+  "kpi_definitions": {
+    "lead_time_despacho": {
+      "campo_tecnico": "lead_time_despacho",
+      "nome": "Tempo Médio de Despacho",
+      "explicacao": "Média de dias entre o registro da DI e o desembaraço",
+      "formula": "SELECT AVG(data_desembaraco - data_registro) FROM di_due WHERE data_desembaraco IS NOT NULL AND data_registro IS NOT NULL",
+      "unidade": "dias",
+      "categoria": "operacional",
+      "padroes_pergunta": [
+        "qual o tempo médio de despacho",
+        "quanto tempo demora do registro ao desembaraço",
+        "lead time de liberação"
+      ]
+    },
+    "eficiencia_transporte": {
+      "campo_tecnico": "eficiencia_transporte",
+      "nome": "Eficiência de Transporte",
+      "explicacao": "Tempo entre a saída (ATD) e a chegada (ATA)",
+      "formula": "SELECT AVG(data_ata - data_atd) FROM di_due WHERE data_ata IS NOT NULL AND data_atd IS NOT NULL",
+      "unidade": "dias",
+      "categoria": "logística",
+      "padroes_pergunta": [
+        "tempo de trânsito médio",
+        "quanto tempo leva a viagem",
+        "dias entre atd e ata"
+      ]
+    },
+    "custo_impostos_total": {
+      "campo_tecnico": "custo_impostos_total",
+      "nome": "Custo Tributário Acumulado",
+      "explicacao": "Soma de todos os impostos calculados",
+      "formula": "SELECT SUM(valor_ii + valor_ipi + valor_pis + valor_cofins + valor_icms) FROM di_due",
+      "unidade": "BRL",
+      "categoria": "financeiro",
+      "padroes_pergunta": [
+        "quanto paguei de imposto total",
+        "soma dos tributos",
+        "custo fiscal total"
+      ]
+    }
+  }
+}

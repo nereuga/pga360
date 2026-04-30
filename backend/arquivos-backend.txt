@@ -1,0 +1,1045 @@
+#### ARQUIVOS DA PASTA backend DA APP
+
+1 - backend/Dockerfile
+2 - backend/carga_dicionario.json
+3 - backend/instantclient-basic-linux.x64-19.22.0.0.0dbru.zip
+4 - backend/requirements.txt
+5 - backend/auth.py
+6 - backend/database.py
+7 - backend/main.py
+8 - backend/models.py
+9 - backend/schemas.py
+10 - backend/seed.py
+11 - backend/utils/report_engine.py
+
+
+*** 1 - backend/Dockerfile
+
+# Usamos a versão estável atual
+FROM python:3.9-slim-bookworm
+
+# Evita arquivos .pyc e garante logs em tempo real
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# --- CONFIGURAÇÃO DE REDE E MIRRORS BRASILEIROS ---
+RUN sed -i 's/deb.debian.org/ftp.br.debian.org/g' /etc/apt/sources.list.d/debian.sources || \
+    sed -i 's/deb.debian.org/ftp.br.debian.org/g' /etc/apt/sources.list && \
+    echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+
+# Instala dependências do sistema
+RUN apt-get clean && apt-get update --fix-missing && \
+    apt-get install -y --no-install-recommends \
+    libpq-dev \
+    gcc \
+    libaio1 \
+    unzip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# --- INSTALAÇÃO DO ORACLE INSTANT CLIENT (MODO OFFLINE) ---
+WORKDIR /opt/oracle
+
+# COPIAMOS o arquivo que você baixou manualmente para dentro do container
+COPY instantclient-basic-linux.x64-19.22.0.0.0dbru.zip .
+
+# Descompactamos e limpamos
+RUN unzip instantclient-basic-linux.x64-19.22.0.0.0dbru.zip && \
+    rm -f instantclient-basic-linux.x64-19.22.0.0.0dbru.zip
+
+# Define variáveis de ambiente para o Oracle Thick Mode
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_19_22
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+*** 2 - backend/carga_dicionario.json
+
+{
+  "sinonimos": {
+    "data_green_light": {
+      "campo_tecnico": "data_green_light",
+      "termos": [
+        {"termo": "green light", "peso": 10},
+        {"termo": "liberação aduaneira", "peso": 9},
+        {"termo": "luz verde", "peso": 8},
+        {"termo": "autorização para embarque", "peso": 7}
+      ]
+    },
+    "data_atd": {
+      "campo_tecnico": "data_atd",
+      "termos": [
+        {"termo": "atd", "peso": 10},
+        {"termo": "actual time departure", "peso": 9},
+        {"termo": "saída real", "peso": 8},
+        {"termo": "data de despacho", "peso": 8},
+        {"termo": "zarpe", "peso": 8}
+      ]
+    },
+    "data_ata": {
+      "campo_tecnico": "data_ata",
+      "termos": [
+        {"termo": "ata", "peso": 10},
+        {"termo": "actual time arrival", "peso": 9},
+        {"termo": "chegada real", "peso": 8},
+        {"termo": "atracação", "peso": 7}
+      ]
+    },
+    "data_registro": {
+      "campo_tecnico": "data_registro",
+      "termos": [
+        {"termo": "registro", "peso": 10},
+        {"termo": "numeração da di", "peso": 10},
+        {"termo": "início do despacho", "peso": 9}
+      ]
+    },
+    "total_fob": {
+      "campo_tecnico": "total_fob",
+      "termos": [
+        {"termo": "valor mercadoria", "peso": 10},
+        {"termo": "fob", "peso": 10},
+        {"termo": "valor comercial", "peso": 9}
+      ]
+    }
+  },
+  "kpi_definitions": {
+    "lead_time_despacho": {
+      "campo_tecnico": "lead_time_despacho",
+      "nome": "Tempo Médio de Despacho",
+      "explicacao": "Média de dias entre o registro da DI e o desembaraço",
+      "formula": "SELECT AVG(data_desembaraco - data_registro) FROM di_due WHERE data_desembaraco IS NOT NULL AND data_registro IS NOT NULL",
+      "unidade": "dias",
+      "categoria": "operacional",
+      "padroes_pergunta": [
+        "qual o tempo médio de despacho",
+        "quanto tempo demora do registro ao desembaraço",
+        "lead time de liberação"
+      ]
+    },
+    "eficiencia_transporte": {
+      "campo_tecnico": "eficiencia_transporte",
+      "nome": "Eficiência de Transporte",
+      "explicacao": "Tempo entre a saída (ATD) e a chegada (ATA)",
+      "formula": "SELECT AVG(data_ata - data_atd) FROM di_due WHERE data_ata IS NOT NULL AND data_atd IS NOT NULL",
+      "unidade": "dias",
+      "categoria": "logística",
+      "padroes_pergunta": [
+        "tempo de trânsito médio",
+        "quanto tempo leva a viagem",
+        "dias entre atd e ata"
+      ]
+    },
+    "custo_impostos_total": {
+      "campo_tecnico": "custo_impostos_total",
+      "nome": "Custo Tributário Acumulado",
+      "explicacao": "Soma de todos os impostos calculados",
+      "formula": "SELECT SUM(valor_ii + valor_ipi + valor_pis + valor_cofins + valor_icms) FROM di_due",
+      "unidade": "BRL",
+      "categoria": "financeiro",
+      "padroes_pergunta": [
+        "quanto paguei de imposto total",
+        "soma dos tributos",
+        "custo fiscal total"
+      ]
+    }
+  }
+}
+
+*** 3 - backend/instantclient-basic-linux.x64-19.22.0.0.0dbru.zip
+
+
+
+*** 4 - backend/requirements.txt
+
+fastapi==0.104.1
+uvicorn==0.24.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+pydantic==2.5.2
+pydantic-settings==2.1.0
+google-generativeai>=0.7.0
+oracledb==2.0.0
+supabase==2.3.0
+pandas==2.1.3
+openpyxl==3.1.2
+reportlab==4.0.8
+
+*** 5 - backend/auth.py
+
+from fastapi import HTTPException, Security, Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase import create_client, Client
+from sqlalchemy.orm import Session
+import os
+import models, database
+
+# Configurações do Supabase extraídas do .env
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+security = HTTPBearer()
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+    db: Session = Depends(database.get_db)
+):
+    token = credentials.credentials
+    try:
+        # Busca o usuário no Supabase
+        user_res = supabase.auth.get_user(token)
+        supabase_user = user_res.user
+        
+        # VALIDAÇÃO EXTRA: O e-mail foi confirmado?
+        if not supabase_user.email_confirmed_at:
+            raise HTTPException(
+                status_code=403, 
+                detail="E-mail ainda não confirmado. Verifique sua caixa de entrada (Etapa 1)."
+            )
+        
+        # VALIDAÇÃO ETAPA 2: Aprovação manual na base local
+        perfil = db.query(models.UsuarioPerfil).filter(
+            models.UsuarioPerfil.supabase_uid == supabase_user.id
+        ).first()
+
+        if not perfil or not perfil.is_aprovado:
+            raise HTTPException(
+                status_code=403, 
+                detail="Aguardando aprovação manual do administrador (Etapa 2)."
+            )
+
+        return perfil 
+    except Exception as e:
+        # Se o erro já for uma HTTPException (como as de cima), repassa ela
+        if isinstance(e, HTTPException): raise e
+        # Se for erro de token expirado ou inválido
+        raise HTTPException(status_code=401, detail="Sessão inválida ou expirada.")
+
+*** 6 - backend/database.py
+
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
+
+# Carrega a URL do banco do ambiente (Docker Net)
+# Ex: postgresql://user:password@db-360:5432/pga_360_db
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+
+# O pool_pre_ping ajuda a manter a conexão viva em ambientes de rede instáveis
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, 
+    pool_pre_ping=True
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Gerenciador de Sessão para os Endpoints
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+*** 7 - backend/main.py
+
+from fastapi import FastAPI, Depends, HTTPException, Security
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import text, distinct, func
+from sqlalchemy.exc import IntegrityError
+import os
+import json
+import subprocess
+import google.generativeai as genai
+from datetime import date, datetime
+
+# Importações dos módulos internos
+import models, database, schemas
+from auth import get_current_user
+from utils.report_engine import ReportEngine
+
+app = FastAPI(title="PGA-360 API Gateway Professional")
+
+# --- CONFIGURAÇÃO DO MOTOR DE IA (GEMINI) ---
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+def get_ai_model():
+    """Lógica de descoberta dinâmica do modelo para evitar erro 404"""
+    try:
+        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        model_name = next((n for n in available if "gemini-1.5-flash" in n), available[0])
+        return genai.GenerativeModel(model_name)
+    except:
+        return genai.GenerativeModel('models/gemini-1.5-flash')
+
+# ==========================================================
+# SEÇÃO 1: ROTAS PÚBLICAS E AUTENTICAÇÃO
+# ==========================================================
+
+@app.get("/health")
+def health():
+    return {"status": "online", "app": "PGA-360", "timestamp": datetime.now()}
+
+@app.post("/auth/registrar-perfil")
+def registrar_perfil(obj: schemas.UserRegister, db: Session = Depends(database.get_db)):
+    """Cria o perfil local do usuário para aprovação (Etapa 2)"""
+    try:
+        db_user = models.UsuarioPerfil(
+            supabase_uid=obj.supabase_uid,
+            email=obj.email,
+            perfil=obj.perfil,
+            is_aprovado=False 
+        )
+        db.add(db_user)
+        db.commit()
+        return {"status": "success", "message": "Aguardando aprovação manual da diretoria."}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Usuário já registrado.")
+
+# ==========================================================
+# SEÇÃO 2: GESTÃO OPERACIONAL (DI/DUE E ITENS)
+# ==========================================================
+
+@app.get("/importacoes", response_model=List[schemas.DiDueListSchema])
+def list_importacoes(
+    data_reg_ini: Optional[date] = None, data_reg_fim: Optional[date] = None,
+    numero: Optional[str] = None, regime: Optional[str] = None,
+    modal: Optional[str] = None, skip: int = 0, limit: int = 30,
+    db: Session = Depends(database.get_db),
+    current_user: models.UsuarioPerfil = Depends(get_current_user)
+):
+    query = db.query(models.DiDue)
+    if data_reg_ini: query = query.filter(models.DiDue.data_registro >= data_reg_ini)
+    if data_reg_fim: query = query.filter(models.DiDue.data_registro <= data_reg_fim)
+    if numero: query = query.filter(models.DiDue.di_due.ilike(f"%{numero}%"))
+    if regime: query = query.filter(models.DiDue.regime == regime)
+    if modal: query = query.filter(models.DiDue.modal == modal)
+    return query.order_by(models.DiDue.data_registro.desc()).offset(skip).limit(limit).all()
+
+@app.get("/di-due/{di_id}", response_model=schemas.DiDueDetailSchema)
+def get_di_due_detail(di_id: int, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    di = db.query(models.DiDue).filter(models.DiDue.id == di_id).first()
+    if not di: raise HTTPException(status_code=404, detail="DI não encontrada")
+    return di
+
+@app.get("/di-due/{di_id}/taxas-moedas")
+def get_di_due_rates(di_id: int, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    rates = db.query(models.ItemDiDue.moeda_fob, models.ItemDiDue.taxa_negociada)\
+              .filter(models.ItemDiDue.di_duimp_id == di_id).distinct().all()
+    return [{"moeda": r[0], "taxa": r[1]} for r in rates]
+
+@app.get("/di-due/{di_id}/produtos", response_model=List[schemas.ItemDiDueSchema])
+def list_produtos(di_id: int, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    return db.query(models.ItemDiDue).filter(models.ItemDiDue.di_duimp_id == di_id).all()
+
+@app.get("/produto/{item_id}", response_model=schemas.ItemDiDueSchema)
+def get_item_detail(item_id: int, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    return db.query(models.ItemDiDue).filter(models.ItemDiDue.id == item_id).first()
+
+# ==========================================================
+# SEÇÃO 3: MOTOR DE INTELIGÊNCIA ARTIFICIAL (TEXT-TO-SQL)
+# ==========================================================
+
+@app.post("/ask-ai", response_model=schemas.AskAiResponse)
+def ask_ai(payload: schemas.AskAiRequest, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    model = get_ai_model()
+    
+    # 1. Recupera Memória e Regras
+    memoria = db.query(models.AiMemory).order_by(models.AiMemory.usage_count.desc()).limit(5).all()
+    sinonimos = db.query(models.Sinonimos).all()
+    kpis = db.query(models.KpiDefinitions).all()
+    
+    prompt_base = f"""
+    Você é um especialista em SQL para o sistema COMEX PGA-360.
+    Tabelas principais: 'di_due' e 'item_di_due'.
+    Histórico de sucesso: {str([{"q": m.question, "sql": m.sql_query} for m in memoria])}
+    Regras de Negócio: {str([{"campo": s.campo_tecnico, "termos": s.termos} for s in sinonimos])}
+    
+    Instrução: Retorne APENAS o SQL PostgreSQL puro. Use ILIKE para textos.
+    Pergunta: {payload.question}
+    """
+    
+    try:
+        # 2. Gera e executa SQL
+        sql_gerado = model.generate_content(prompt_base).text.strip().replace("```sql", "").replace("```", "")
+        
+        try:
+            result = db.execute(text(sql_gerado))
+            rows = [dict(r._mapping) for r in result]
+        except Exception as sql_err:
+            # AUTO-CORREÇÃO (Self-healing)
+            fix_prompt = f"O SQL {sql_gerado} falhou com erro {str(sql_err)}. Corrija o SQL."
+            sql_gerado = model.generate_content(fix_prompt).text.strip().replace("```sql", "").replace("```", "")
+            result = db.execute(text(sql_gerado))
+            rows = [dict(r._mapping) for r in result]
+
+        # 3. Atualiza Memória de Sucesso
+        if rows:
+            mem = db.query(models.AiMemory).filter(models.AiMemory.question == payload.question).first()
+            if mem: mem.usage_count += 1
+            else: db.add(models.AiMemory(question=payload.question, sql_query=sql_gerado))
+            db.commit()
+
+        # 4. Humanização da Resposta
+        final_ans = model.generate_content(f"O banco retornou: {str(rows)}. Explique isso estrategicamente para a pergunta: {payload.question}").text
+        return {"answer": final_ans, "sql": sql_gerado}
+
+    except Exception as e:
+        return {"answer": f"Erro analítico: {str(e)}", "sql": "falhou"}
+
+# ==========================================================
+# SEÇÃO 4: ADMINISTRAÇÃO E EXPORTAÇÃO
+# ==========================================================
+
+@app.get("/admin/ai-history", response_model=List[schemas.AiMemorySchema])
+def get_ai_history(search: Optional[str] = None, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    query = db.query(models.AiMemory)
+    if search: query = query.filter(models.AiMemory.question.ilike(f"%{search}%"))
+    return query.order_by(models.AiMemory.usage_count.desc()).all()
+
+@app.post("/admin/sync-oracle")
+def sync_oracle(current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    if current_user.perfil not in ["admin", "diretoria"]: raise HTTPException(403)
+    subprocess.Popen(["python", "seed.py"])
+    return {"status": "Sincronização com Oracle 8i iniciada em background."}
+
+@app.post("/exportar/pdf")
+async def export_pdf(payload: dict, current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    pdf_buffer = ReportEngine.generate_pdf(payload.get("data", []), payload.get("title", "Relatorio"))
+    return StreamingResponse(pdf_buffer, media_type="application/pdf")
+
+@app.post("/exportar/excel")
+async def export_excel(payload: dict, current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    excel_buffer = ReportEngine.generate_excel(payload.get("data", []))
+    return StreamingResponse(excel_buffer, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+*** 8 - backend/models.py
+
+from sqlalchemy import Column, Integer, String, Date, Numeric, ForeignKey, Text, Boolean # <-- Adicionado Boolean
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from database import Base
+
+class Catalogo(Base):
+    __tablename__ = "catalogo"
+    id = Column(Integer, primary_key=True, index=True)
+    seq = Column(String)
+    codigosiscomex = Column(String)
+    denominacao = Column(String)
+    detalhamento = Column(Text)
+    cnpfcnpjraiz = Column(String)
+    situacao = Column(String) # Corrigido typo 'sistuacao'
+    modalidade = Column(String)
+    ncm = Column(String)
+    versao = Column(String)
+    datareferencia = Column(Date)
+    codigosinterno = Column(JSONB)
+    valor = Column(String)
+
+    # Relacionamento com itens
+    itens = relationship("ItemDiDue", back_populates="catalogo")
+
+class DiDue(Base):
+    __tablename__ = "di_due"
+    id = Column(Integer, primary_key=True, index=True)
+    oracle_id = Column(String, index=True, unique=True) 
+    di_due = Column(String, unique=True, index=True)
+    awb_master = Column(String)
+    awb_house = Column(String)
+    modal = Column(String)
+    pais_procedencia = Column(String)
+    pais_origem = Column(String)
+    canal = Column(String)
+    regime = Column(String)
+    data_desembaraco = Column(Date)
+    data_ata = Column(Date)
+    data_atd = Column(Date)
+    data_registro = Column(Date)
+    agente_carga = Column(String)
+    despachante = Column(String)
+    total_fob = Column(Numeric(15, 2))
+    total_frete = Column(Numeric(15, 2))
+    total_seguro = Column(Numeric(15, 2))
+    total_cif = Column(Numeric(15, 2))
+    peso_bruto = Column(Numeric(15, 3))
+    valor_ii = Column(Numeric(15, 2))
+    valor_ipi = Column(Numeric(15, 2))
+    valor_pis = Column(Numeric(15, 2))
+    valor_cofins = Column(Numeric(15, 2))
+    taxa_siscomex = Column(Numeric(15, 2))
+    valor_icms = Column(Numeric(15, 2))
+    valor_armazenagem = Column(Numeric(15, 2))
+    valor_marinha = Column(Numeric(15, 2))
+    tipo_di = Column(String)
+    importador = Column(String)
+    cnpj_importador = Column(String)
+    endereco_importador = Column(String)
+    data_no_sistema = Column(Date)
+    req_concessao_regime = Column(String)
+    urf_entrada = Column(String)
+    rcr = Column(String)
+    peso_liquido = Column(Numeric(15, 3))
+    tipos_embalagem = Column(Numeric(10, 0))
+    taxa_dolar = Column(Numeric(15, 4))
+    valor_ii_devido = Column(Numeric(15, 2))
+    valor_ipi_devido = Column(Numeric(15, 2))
+    valor_pis_devido = Column(Numeric(15, 2))
+    valor_cofins_devido = Column(Numeric(15, 2))
+    valor_ii_recolher = Column(Numeric(15, 2))
+    valor_ipi_recolher = Column(Numeric(15, 2))
+    valor_pis_recolher = Column(Numeric(15, 2))
+    valor_cofins_recolher = Column(Numeric(15, 2))
+    recinto = Column(String)
+    bandeira = Column(String)
+    local_embarque = Column(String)
+    unidade_despacho = Column(String)
+    versao = Column(String, default="1")
+
+    # Relacionamento 1:N com itens
+    itens = relationship("ItemDiDue", back_populates="capa", cascade="all, delete-orphan")
+
+
+class ItemDiDue(Base):
+    __tablename__ = "item_di_due"
+    id = Column(Integer, primary_key=True, index=True)
+    di_duimp_id = Column(Integer, ForeignKey('di_due.id'))
+    catalogo_id = Column(Integer, ForeignKey('catalogo.id'), nullable=True)
+    seq_item = Column(String)
+    adicao = Column(String)
+    subadicao = Column(String)
+    ncm = Column(String)
+    partnumber = Column(String)
+    serie = Column(String)
+    quantidade_comercial = Column(Numeric(15, 4))
+    quantidade_estatistica = Column(Numeric(15, 4))
+    moeda_fob = Column(String)
+    valor_unitario = Column(Numeric(15, 6))
+    total_na_moeda = Column(Numeric(15, 2))
+    total_em_real = Column(Numeric(15, 2))
+    valor_cif = Column(Numeric(15, 2))
+    valor_frete = Column(Numeric(15, 2))
+    valor_seguro = Column(Numeric(15, 2))
+    percentual_ii = Column(Numeric(5, 2))
+    valor_ii = Column(Numeric(15, 2))
+    percentual_ipi = Column(Numeric(5, 2))
+    valor_ipi = Column(Numeric(15, 2))
+    percentual_pis = Column(Numeric(5, 2))
+    valor_pis = Column(Numeric(15, 2))
+    percentual_cofins = Column(Numeric(5, 2))
+    valor_cofins = Column(Numeric(15, 2))
+    valor_ii_devido = Column(Numeric(15, 2))
+    valor_ipi_devido = Column(Numeric(15, 2))
+    valor_pis_devido = Column(Numeric(15, 2))
+    valor_cofins_devido = Column(Numeric(15, 2))
+    valor_ii_recolher = Column(Numeric(15, 2))
+    valor_ipi_recolher = Column(Numeric(15, 2))
+    valor_pis_recolher = Column(Numeric(15, 2))
+    valor_cofins_recolher = Column(Numeric(15, 2))
+    base_calc_ii = Column(Numeric(15, 2))
+    base_calc_ipi = Column(Numeric(15, 2))
+    base_calc_pis = Column(Numeric(15, 2))
+    base_calc_cofins = Column(Numeric(15, 2))
+    taxa_siscomex = Column(Numeric(15, 2))
+    fabricante = Column(String)
+    pais_origem = Column(String)
+    nota_fiscal = Column(String)
+    seq_nota_fiscal = Column(String)
+    fundamentacao_legal = Column(Text)
+    peso_liquido_unitario = Column(Numeric(15, 3))
+    peso_liquido_total = Column(Numeric(15, 3))
+    id_serpro = Column(String)
+    id_importador = Column(String)
+    descricao_mercadoria = Column(Text)
+    descricao_complementar = Column(Text)
+    denominacao = Column(String)
+    unidade_medida = Column(String)
+    unidade_estatistica = Column(String)
+    ref_valor_fob = Column(Numeric(15, 2))
+    incoterm = Column(String)
+    taxa_negociada = Column(Numeric(15, 4))
+    op_estrang_fornec = Column(String)
+    op_estrang_ende_fornec = Column(String)
+    op_estrang_fabricante = Column(String)
+    op_estrang_ende_fabric = Column(String)
+    op_estrang_pais_origem = Column(String)
+    op_estrang_pais_desconhecido = Column(String)
+    op_estrang_vinc_impo_expo = Column(String)
+    op_estrang_tipo_fabricante = Column(String)
+
+    # Relacionamentos
+    capa = relationship("DiDue", back_populates="itens")
+    catalogo = relationship("Catalogo", back_populates="itens")
+
+class Sinonimos(Base):
+    __tablename__ = "sinonimos"
+    id = Column(Integer, primary_key=True)
+    campo_tecnico = Column(String, unique=True)
+    peso = Column(Integer)
+    termos = Column(JSONB, nullable=False)
+
+class KpiDefinitions(Base):
+    __tablename__ = "kpi_definitions"
+    id = Column(Integer, primary_key=True)
+    kpi_code = Column(String, unique=True)
+    campo_tecnico = Column(String)
+    nome = Column(String)
+    explicacao = Column(String)
+    formula_sql = Column(String)
+    unidade = Column(String)
+    categoria = Column(String)
+    padroes_pergunta = Column(JSONB, nullable=False)
+
+class AiMemory(Base):
+    __tablename__ = "ai_memory"
+    id = Column(Integer, primary_key=True)
+    question = Column(String, unique=True)
+    sql_query = Column(String)
+    usage_count = Column(Integer, default=1)
+
+class UsuarioPerfil(Base):
+    __tablename__ = "usuarios_perfis"
+    id = Column(Integer, primary_key=True)
+    supabase_uid = Column(String, unique=True, index=True) # ID gerado pelo Supabase
+    email = Column(String, unique=True)
+    is_aprovado = Column(Boolean, default=False) # Segunda etapa do credenciamento
+    perfil = Column(String, default="consulta") # admin, operacional, consulta
+    data_cadastro = Column(DateTime, default=func.now())
+
+*** 9 - backend/schemas.py
+
+from pydantic import BaseModel, ConfigDict, EmailStr
+from typing import List, Optional, Any
+from datetime import date, datetime
+from decimal import Decimal
+
+# ==========================================================
+# SCHEMAS DE SEGURANÇA E USUÁRIO
+# ==========================================================
+
+class UserRegister(BaseModel):
+    supabase_uid: str
+    email: EmailStr
+    perfil: str
+
+class UsuarioPerfilSchema(BaseModel):
+    id: int
+    supabase_uid: str
+    email: str
+    is_aprovado: bool
+    perfil: str
+    data_cadastro: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================================
+# SCHEMAS DO FLUXO ADUANEIRO (DI/DUE)
+# ==========================================================
+
+class DiDueListSchema(BaseModel):
+    """Schema otimizado para a grade de busca (Grid)"""
+    id: int
+    di_due: str
+    tipo_di: Optional[str] = None
+    cnpj_importador: Optional[str] = None
+    importador: Optional[str] = None
+    data_registro: Optional[date] = None
+    data_desembaraco: Optional[date] = None
+    canal: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class DiDueDetailSchema(BaseModel):
+    """Schema completo para o cabeçalho e abas de detalhamento"""
+    id: int
+    oracle_id: str
+    di_due: str
+    awb_master: Optional[str] = None
+    awb_house: Optional[str] = None
+    modal: Optional[str] = None
+    pais_procedencia: Optional[str] = None
+    pais_origem: Optional[str] = None
+    canal: Optional[str] = None
+    regime: Optional[str] = None
+    data_desembaraco: Optional[date] = None
+    data_ata: Optional[date] = None
+    data_atd: Optional[date] = None
+    data_registro: Optional[date] = None
+    agente_carga: Optional[str] = None
+    despachante: Optional[str] = None
+    total_fob: Optional[Decimal] = None
+    total_frete: Optional[Decimal] = None
+    total_seguro: Optional[Decimal] = None
+    total_cif: Optional[Decimal] = None
+    peso_bruto: Optional[Decimal] = None
+    valor_ii: Optional[Decimal] = None
+    valor_ipi: Optional[Decimal] = None
+    valor_pis: Optional[Decimal] = None
+    valor_cofins: Optional[Decimal] = None
+    taxa_siscomex: Optional[Decimal] = None
+    valor_icms: Optional[Decimal] = None
+    valor_armazenagem: Optional[Decimal] = None
+    valor_marinha: Optional[Decimal] = None
+    tipo_di: Optional[str] = None
+    importador: Optional[str] = None
+    cnpj_importador: Optional[str] = None
+    endereco_importador: Optional[str] = None
+    data_no_sistema: Optional[date] = None
+    urf_entrada: Optional[str] = None
+    rcr: Optional[str] = None
+    peso_liquido: Optional[Decimal] = None
+    tipos_embalagem: Optional[Decimal] = None
+    taxa_dolar: Optional[Decimal] = None
+    versao: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================================
+# SCHEMAS DE ITENS E PRODUTOS
+# ==========================================================
+
+class ItemDiDueSchema(BaseModel):
+    id: int
+    di_duimp_id: int
+    seq_item: str
+    adicao: Optional[str] = None
+    ncm: Optional[str] = None
+    partnumber: Optional[str] = None
+    quantidade_comercial: Optional[Decimal] = None
+    valor_unitario: Optional[Decimal] = None
+    total_na_moeda: Optional[Decimal] = None
+    moeda_fob: Optional[str] = None
+    descricao_mercadoria: Optional[str] = None
+    valor_ii: Optional[Decimal] = None
+    valor_ipi: Optional[Decimal] = None
+    valor_pis: Optional[Decimal] = None
+    valor_cofins: Optional[Decimal] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================================
+# SCHEMAS DE IA E ANALYTICS
+# ==========================================================
+
+class AiMemorySchema(BaseModel):
+    id: int
+    question: str
+    sql_query: str
+    usage_count: int
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class AskAiRequest(BaseModel):
+    question: str
+
+class AskAiResponse(BaseModel):
+    answer: str
+    sql: str
+
+class TaxaMoedaSchema(BaseModel):
+    moeda: str
+    taxa: Optional[Decimal] = None
+
+*** 10 - backend/seed.py
+
+import os
+import json
+import time
+import oracledb
+import logging
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+import models, database
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ETL-360")
+
+# Thick Mode para Oracle 8i
+try:
+    lib_path = os.getenv("LD_LIBRARY_PATH", "/opt/oracle/instantclient_19_22")
+    oracledb.init_oracle_client(lib_dir=lib_path)
+except Exception as e:
+    logger.warning(f"Thick Mode: {e}")
+
+def sanitize(val):
+    if val is None or str(val).lower() in ['nan', 'null', 'none', '', 'nat']:
+        return None
+    return val
+
+def sync_oracle_to_postgres(db: Session):
+    try:
+        ora_conn = oracledb.connect(
+            user=os.getenv('ORACLE_USER'),
+            password=os.getenv('ORACLE_PASSWORD'),
+            host=os.getenv('ORACLE_HOST'),
+            port=int(os.getenv('ORACLE_PORT')),
+            sid=os.getenv('ORACLE_SID')
+        )
+        ora_cursor = ora_conn.cursor()
+
+        # --- FASE 1: CARGA DA CAPA ---
+        logger.info("📥 Extraindo CAPA_DI_PGA_360...")
+        ora_cursor.execute("SELECT * FROM BDMODC01.CAPA_DI_PGA_360")
+        
+        ora_cols = [col[0].lower() for col in ora_cursor.description]
+        
+        for row in ora_cursor:
+            r = dict(zip(ora_cols, row))
+            
+            di = models.DiDue(
+                # MAPEAMENTO DA CHAVE TÉCNICA QUE VOCÊ INFORMOU
+                oracle_id=str(r.get('chave_primaria')), 
+                
+                di_due=sanitize(r.get('numero_di_dsi')),
+                awb_master=sanitize(r.get('awb_master')),
+                awb_house=sanitize(r.get('awb_house')),
+                modal=sanitize(r.get('modal')),
+                pais_procedencia=sanitize(r.get('pais_procedencia')),
+                pais_origem=sanitize(r.get('pais_origem')),
+                canal=sanitize(r.get('canal')),
+                regime=sanitize(r.get('regime')),
+                data_desembaraco=r.get('data_desembaraco'),
+                data_ata=r.get('data_ata'),
+                data_atd=r.get('data_atd'),
+                data_registro=r.get('data_registro'),
+                agente_carga=sanitize(r.get('agente_carga')),
+                despachante=sanitize(r.get('despachante')),
+                total_fob=r.get('total_fob_neg'),
+                total_frete=r.get('total_frete_neg'),
+                total_seguro=r.get('total_seguro_neg'),
+                total_cif=r.get('total_cif_neg'),
+                peso_bruto=r.get('peso_bruto'),
+                valor_ii=r.get('valor_ii'),
+                valor_ipi=r.get('valor_ipi'),
+                valor_pis=r.get('valor_pis'),
+                valor_cofins=r.get('valor_cofins'),
+                taxa_siscomex=r.get('taxa_siscomex'),
+                valor_icms=r.get('valor_icms'),
+                valor_armazenagem=r.get('valor_armazenagem'),
+                valor_marinha=r.get('marinha_mercante'),
+                tipo_di=sanitize(r.get('tipo_di')),
+                importador=sanitize(r.get('importador')),
+                cnpj_importador=sanitize(r.get('cnpj_importador')),
+                endereco_importador=sanitize(r.get('endereco_importador')),
+                data_no_sistema=r.get('data_no_sistema'),
+                req_concessao_regime=sanitize(r.get('req_concessao_regime')),
+                urf_entrada=sanitize(r.get('urf_entrada')),
+                rcr=sanitize(r.get('termo_responsabilidade')),
+                peso_liquido=r.get('proc_peso_liquido'),
+                tipos_embalagem=r.get('proc_qtd_embalagem'),
+                taxa_dolar=r.get('taxa_cambia_dolar'),
+                valor_ii_devido=r.get('valor_ii_devido'),
+                valor_ipi_devido=r.get('valor_ipi_devido'),
+                valor_pis_devido=r.get('valor_pis_devido'),
+                valor_cofins_devido=r.get('valor_cofins_devido'),
+                valor_ii_recolher=r.get('valor_ii_recolher'),
+                valor_ipi_recolher=r.get('valor_ipi_recolher'),
+                valor_pis_recolher=r.get('valor_pis_recolher'),
+                valor_cofins_recolher=r.get('valor_cofins_recolher'),
+                recinto=sanitize(r.get('recinto_alfandegado')),
+                bandeira=sanitize(r.get('bandeira')),
+                local_embarque=sanitize(r.get('local_embarque')),
+                unidade_despacho=sanitize(r.get('urf_despacho'))
+            )
+            db.merge(di) 
+        
+        db.commit()
+        logger.info("✅ Capas sincronizadas com sucesso.")
+
+        # --- FASE 2: CARGA DOS ITENS ---
+        logger.info("📥 Extraindo ITEM_DI_PGA_360...")
+        ora_cursor.execute("SELECT * FROM BDMODC01.ITEM_DI_PGA_360")
+        
+        item_cols = [col[0].lower() for col in ora_cursor.description]
+        
+        # Limpamos os itens atuais para garantir que não haja duplicidade em cargas parciais
+        db.execute(text("TRUNCATE TABLE item_di_due RESTART IDENTITY CASCADE"))
+        
+        count_item = 0
+        for row in ora_cursor:
+            rit = dict(zip(item_cols, row))
+            
+            # --- O PULO DO GATO: VÍNCULO TÉCNICO ---
+            # Buscamos a capa no Postgres onde o oracle_id casa com a chave_primaria_processo do Oracle
+            oracle_id_pai = str(rit.get('chave_primaria_processo'))
+            capa_local = db.query(models.DiDue).filter(models.DiDue.oracle_id == oracle_id_pai).first()
+            
+            if not capa_local:
+                logger.warning(f"⚠️ Item ignorado: processo pai {oracle_id_pai} não encontrado.")
+                continue
+
+            item = models.ItemDiDue(
+                di_duimp_id=capa_local.id, # ID autoincremento do Postgres vinculado corretamente
+                seq_item=sanitize(rit.get('codigo_item')),
+                adicao=sanitize(rit.get('adicao')),
+                subadicao=sanitize(rit.get('subadicao')),
+                ncm=sanitize(rit.get('ncm')),
+                partnumber=sanitize(rit.get('partnumber')),
+                serie=sanitize(rit.get('serie')),
+                quantidade_comercial=rit.get('quantidade_comercial'),
+                quantidade_estatistica=rit.get('quantidade_estatistica'),
+                moeda_fob=sanitize(rit.get('moeda')),
+                valor_unitario=rit.get('valor_unitario'),
+                total_na_moeda=rit.get('total_na_moeda'),
+                total_em_real=rit.get('total_em_real'),
+                valor_cif=rit.get('valor_cif'),
+                valor_frete=rit.get('valor_frete'),
+                valor_seguro=rit.get('valor_seguro'),
+                percentual_ii=rit.get('percentual_ii'),
+                valor_ii=rit.get('valor_ii'),
+                percentual_ipi=rit.get('percentual_ipi'),
+                valor_ipi=rit.get('valor_ipi'),
+                percentual_pis=rit.get('percentual_pis'),
+                valor_pis=rit.get('valor_pis'),
+                percentual_cofins=rit.get('percentual_cofins'),
+                valor_cofins=rit.get('valor_cofins'),
+                base_calc_ii=rit.get('ref_base_calc_ii'),
+                base_calc_ipi=rit.get('ref_base_calc_ipi'),
+                base_calc_pis=rit.get('ref_base_calc_pis'),
+                base_calc_cofins=rit.get('ref_base_calc_cofins'),
+                taxa_siscomex=rit.get('taxa_siscomex'),
+                fabricante=sanitize(rit.get('fabricante')),
+                pais_origem=sanitize(rit.get('pais_origem')),
+                nota_fiscal=sanitize(rit.get('nota_fiscal')),
+                seq_nota_fiscal=sanitize(rit.get('seq_nota_fiscal')),
+                fundamentacao_legal=sanitize(rit.get('fundamentacao_legal')),
+                peso_liquido_unitario=rit.get('peso_liquido'),
+                peso_liquido_total=rit.get('peso_liquido_tot_adicao'),
+                id_serpro=sanitize(rit.get('id_serpro')),
+                id_importador=sanitize(rit.get('id_dtb')),
+                descricao_mercadoria=sanitize(rit.get('descricao_da_mercadoria')),
+                descricao_complementar=sanitize(rit.get('ref_descricao_compl_padim')),
+                unidade_medida=sanitize(rit.get('unidade_medida')),
+                unidade_estatistica=sanitize(rit.get('unidade_estatistica')),
+                ref_valor_fob=rit.get('ref_valor_fob'),
+                incoterm=sanitize(rit.get('incoterm')),
+                taxa_negociada=rit.get('taxa_conversao')
+            )
+            db.add(item)
+            count_item += 1
+            if count_item % 100 == 0: db.flush()
+
+        db.commit()
+        logger.info(f"✅ {count_item} itens vinculados e sincronizados.")
+
+    except Exception as e:
+        logger.error(f"❌ Erro fatal: {e}")
+        db.rollback()
+    finally:
+        if 'ora_conn' in locals(): ora_conn.close()
+        db.close()
+
+def main():
+    """Entrypoint principal do script"""
+    logger.info("🚀 Iniciando Motor de Carga PGA-360...")
+    
+    # 1. Aguarda o Postgres estar pronto
+    engine = database.engine
+    connected = False
+    for i in range(10):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                connected = True
+                break
+        except:
+            logger.info("⏳ Aguardando banco PostgreSQL...")
+            time.sleep(3)
+    
+    if not connected:
+        logger.error("❌ Falha ao conectar no PostgreSQL.")
+        return
+
+    # 2. Cria estrutura de tabelas
+    models.Base.metadata.create_all(bind=engine)
+    
+    # 3. Executa as cargas
+    db = database.SessionLocal()
+    try:
+        sync_auxiliary_data(db)
+        sync_oracle_to_postgres(db)
+        logger.info("🏁 Processo de carga finalizado com sucesso!")
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    main()
+
+*** 11 - backend/utils/report_engine.py
+
+import io
+import pandas as pd
+from datetime import datetime
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+
+class ReportEngine:
+    @staticmethod
+    def generate_excel(data: list) -> io.BytesIO:
+        """Converte lista de dicionários em arquivo Excel formatado"""
+        df = pd.DataFrame(data)
+        output = io.BytesIO()
+        # openpyxl é a biblioteca que permite criar arquivos .xlsx
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='PGA-360-Export')
+        output.seek(0)
+        return output
+
+    @staticmethod
+    def generate_pdf(data: list, title: str) -> io.BytesIO:
+        """Gera um PDF corporativo com tabelas formatadas"""
+        output = io.BytesIO()
+        # Usamos landscape para caber mais colunas
+        doc = SimpleDocTemplate(output, pagesize=landscape(A4), 
+                               rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Cabeçalho do Relatório
+        elements.append(Paragraph(f"<b>SISTEMA PGA-360 - GESTÃO ADUANEIRA</b>", styles['Heading1']))
+        elements.append(Paragraph(f"Relatório: {title}", styles['Heading2']))
+        elements.append(Paragraph(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
+        elements.append(Spacer(1, 20))
+
+        if not data:
+            elements.append(Paragraph("Nenhum dado encontrado para exportação.", styles['Normal']))
+        else:
+            # Extração de colunas e dados
+            headers = list(data[0].keys())
+            # Formata os nomes das colunas (remove underscores e capitaliza)
+            display_headers = [h.replace('_', ' ').upper() for h in headers]
+            
+            table_data = [display_headers]
+            for item in data:
+                table_data.append([str(item.get(h, "")) for h in headers])
+
+            # Criação da Tabela com ajuste automático de largura
+            # Nota: Em relatórios muito largos, pode ser necessário limitar as colunas
+            t = Table(table_data, repeatRows=1)
+            
+            # Estilização da Tabela (Padrão Corporativo Azul Marinho)
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1A3A5A")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 7), # Fonte menor para caber tudo
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            elements.append(t)
+
+        doc.build(elements)
+        output.seek(0)
+        return output
