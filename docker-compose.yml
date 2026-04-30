@@ -1,0 +1,67 @@
+version: '3.8'
+name: pga-360 # Nome da stack para isolamento no Docker Desktop
+
+services:
+  # --- BANCO DE DADOS POSTGRESQL ---
+  db-360:
+    image: postgres:15
+    container_name: pga_360_db_container
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    ports:
+      - "5435:5432" # Acesso via DBeaver na porta 5435
+    volumes:
+      - pga_360_data:/var/lib/postgresql/data
+    networks:
+      - pga360_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- BACKEND (FastAPI + ETL Oracle) ---
+  backend-360:
+    build: ./backend
+    container_name: pga_360_backend_container
+    # O comando aguarda o banco, roda o novo seed (ETL) e inicia a API
+    command: sh -c "python seed.py && uvicorn main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8003:8000" # API acessível em http://localhost:8003
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db-360:5432/${POSTGRES_DB}
+    depends_on:
+      db-360:
+        condition: service_healthy
+    networks:
+      - pga360_net
+
+  # --- FRONTEND (Streamlit + Navegação 360) ---
+  frontend-360:
+    build: ./frontend
+    container_name: pga_360_frontend_container
+    restart: always
+    ports:
+      - "8504:8501" # Interface acessível em http://localhost:8504
+    env_file: .env
+    volumes:
+      - ./frontend:/app
+    environment:
+      - API_URL=http://backend-360:8000
+    depends_on:
+      - backend-360 # CORRIGIDO: Agora aponta para o nome correto do serviço acima
+    networks:
+      - pga360_net
+
+networks:
+  pga360_net:
+    driver: bridge
+
+volumes:
+  pga_360_data:
