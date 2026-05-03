@@ -18,10 +18,11 @@ services:
     networks:
       - pga360_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s       # Aumentamos o intervalo
       timeout: 5s
-      retries: 5
+      retries: 10         # Aumentamos para 10 tentativas (total de 100 segundos)
+      start_period: 30s   # Dá 30 segundos de lambuja antes de começar a testar
 
   # --- BACKEND (FastAPI + ETL Oracle) ---
   backend-360:
