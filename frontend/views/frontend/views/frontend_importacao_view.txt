@@ -1,0 +1,101 @@
+import streamlit as st
+import requests
+import pandas as pd
+import os
+from datetime import datetime
+
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    st.title("📥 GESTÃO DE IMPORTAÇÕES")
+
+    # --- 1. INICIALIZAÇÃO DE ESTADO (BLINDADO) ---
+    if "filter_params" not in st.session_state:
+        st.session_state.filter_params = {
+            "data_reg_ini": None, "data_reg_fim": None,
+            "data_des_ini": None, "data_des_fim": None,
+            "numero": "", "regime": "Todos", "modal": "Todos", "canal": "Todos"
+        }
+    
+    if "search_performed" not in st.session_state:
+        st.session_state.search_performed = False
+
+    headers = {"Authorization": f"Bearer {st.session_state.auth_token}"}
+
+    # --- 2. FORMULÁRIO DE FILTROS ---
+    with st.container(border=True):
+        c1, c2, c3, c4 = st.columns(4)
+        f_reg_ini = c1.date_input("Registro De", value=st.session_state.filter_params["data_reg_ini"])
+        f_reg_fim = c2.date_input("Registro Até", value=st.session_state.filter_params["data_reg_fim"])
+        f_des_ini = c3.date_input("Desembaraço De", value=st.session_state.filter_params["data_des_ini"])
+        f_des_fim = c4.date_input("Desembaraço Até", value=st.session_state.filter_params["data_des_fim"])
+
+        c5, c6, c7, c8 = st.columns(4)
+        f_numero = c5.text_input("Número DI/DUIMP", value=st.session_state.filter_params["numero"])
+        f_regime = c6.selectbox("Regime", ["Todos", "CONSUMO", "ADMISSAO TEMPORARIA", "DRAWBACK"], 
+                               index=["Todos", "CONSUMO", "ADMISSAO TEMPORARIA", "DRAWBACK"].index(st.session_state.filter_params["regime"]))
+        f_modal = c7.selectbox("Modal", ["Todos", "(Z1)OCEAN-CONTAINER", "(Z2)AIR", "(Z3)ROAD"],
+                              index=["Todos", "(Z1)OCEAN-CONTAINER", "(Z2)AIR", "(Z3)ROAD"].index(st.session_state.filter_params["modal"]))
+        f_canal = c8.selectbox("Canal", ["Todos", "Verde", "Amarelo", "Vermelho", "Cinza"],
+                              index=["Todos", "Verde", "Amarelo", "Vermelho", "Cinza"].index(st.session_state.filter_params["canal"]))
+
+        col_btn1, col_btn2, _ = st.columns([1, 1, 4])
+        if col_btn1.button("🔍 Consultar", use_container_width=True, type="primary"):
+            st.session_state.filter_params = {
+                "data_reg_ini": f_reg_ini, "data_reg_fim": f_reg_fim,
+                "data_des_ini": f_des_ini, "data_des_fim": f_des_fim,
+                "numero": f_numero, "regime": f_regime, "modal": f_modal, "canal": f_canal
+            }
+            st.session_state.search_performed = True
+            st.rerun()
+
+        if col_btn2.button("🧹 Limpar", use_container_width=True):
+            st.session_state.filter_params = {
+                "data_reg_ini": None, "data_reg_fim": None, "data_des_ini": None, "data_des_fim": None,
+                "numero": "", "regime": "Todos", "modal": "Todos", "canal": "Todos"
+            }
+            st.session_state.search_performed = False
+            st.rerun()
+
+    # --- 3. EXIBIÇÃO DOS RESULTADOS ---
+    if st.session_state.search_performed:
+        # Prepara os parâmetros exatamente como o Backend espera
+        params = {k: (v if v != "Todos" else None) for k, v in st.session_state.filter_params.items()}
+        
+        try:
+            response = requests.get(f"{API_URL}/importacoes", params=params, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                if data:
+                    st.subheader(f"📋 {len(data)} Declarações Localizadas")
+                    
+                    # Colunagem Blindada (10 colunas conforme solicitado)
+                    cols = st.columns([1.5, 0.8, 1.5, 2, 1, 1, 1.2, 1.2, 1, 1.2])
+                    labels = ["DI/DUE", "Tipo", "CNPJ", "Importador", "Registro", "Desemb.", "Regime", "Modal", "Canal", "Ação"]
+                    for col, label in zip(cols, labels): col.write(f"**{label}**")
+                    st.divider()
+
+                    for item in data:
+                        r = st.columns([1.5, 0.8, 1.5, 2, 1, 1, 1.2, 1.2, 1, 1.2])
+                        r[0].write(item.get('di_due', '-'))
+                        r[1].write(item.get('tipo_di', '-'))
+                        r[2].write(item.get('cnpj_importador', '-'))
+                        r[3].write(item.get('importador', '-')[:15])
+                        r[4].write(item.get('data_registro', '-'))
+                        r[5].write(item.get('data_desembaraco', '-'))
+                        r[6].write(item.get('regime', '-'))
+                        # Ponto 5: Tratamento para Modal não vir vazio
+                        modal_txt = item.get('modal', '-')
+                        r[7].write(modal_txt[:10] if modal_txt else '-')
+                        r[8].write(item.get('canal', '-'))
+                        
+                        if r[9].button("Detalhes", key=f"det_{item['id']}", use_container_width=True):
+                            st.session_state.selected_di_id = item['id']
+                            st.session_state.current_page = "di_due"
+                            st.rerun()
+                else:
+                    st.info("Nenhum registro encontrado para os filtros aplicados.")
+            else:
+                st.error(f"Erro na API: {response.status_code}")
+        except Exception as e:
+            st.error(f"Falha de conexão: {e}")

@@ -1,0 +1,125 @@
+from pydantic import BaseModel, ConfigDict, EmailStr
+from typing import List, Optional, Any
+from datetime import date, datetime
+from decimal import Decimal
+
+# ==========================================================
+# SCHEMAS DE SEGURANÇA E USUÁRIO
+# ==========================================================
+
+class UserRegister(BaseModel):
+    supabase_uid: str
+    email: EmailStr
+    perfil: str
+
+class UsuarioPerfilSchema(BaseModel):
+    id: int
+    supabase_uid: str
+    email: str
+    is_aprovado: bool
+    perfil: str
+    data_cadastro: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# ==========================================================
+# SCHEMAS DO FLUXO ADUANEIRO (DI/DUE)
+# ==========================================================
+
+class DiDueListSchema(BaseModel):
+    """Schema otimizado para a grade de busca (Grid)"""
+    id: int
+    di_due: str
+    tipo_di: Optional[str] = None
+    cnpj_importador: Optional[str] = None
+    importador: Optional[str] = None
+    data_registro: Optional[date] = None
+    data_desembaraco: Optional[date] = None
+    regime: Optional[str] = None
+    modal: Optional[str] = None
+    canal: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class DiDueDetailSchema(BaseModel):
+    """Schema completo para o cabeçalho e abas de detalhamento"""
+    id: int
+    oracle_id: str
+    di_due: str
+    awb_master: Optional[str] = None
+    awb_house: Optional[str] = None
+    modal: Optional[str] = None
+    pais_procedencia: Optional[str] = None
+    pais_origem: Optional[str] = None
+    canal: Optional[str] = None
+    regime: Optional[str] = None
+    data_desembaraco: Optional[date] = None
+    data_ata: Optional[date] = None
+    data_atd: Optional[date] = None
+    data_registro: Optional[date] = None
+    agente_carga: Optional[str] = None
+    despachante: Optional[str] = None
+    total_fob: Optional[Decimal] = None
+    total_frete: Optional[Decimal] = None
+    total_seguro: Optional[Decimal] = None
+    total_cif: Optional[Decimal] = None
+    peso_bruto: Optional[Decimal] = None
+    valor_ii: Optional[Decimal] = None
+    valor_ipi: Optional[Decimal] = None
+    valor_pis: Optional[Decimal] = None
+    valor_cofins: Optional[Decimal] = None
+    taxa_siscomex: Optional[Decimal] = None
+    valor_icms: Optional[Decimal] = None
+    valor_armazenagem: Optional[Decimal] = None
+    valor_marinha: Optional[Decimal] = None
+    tipo_di: Optional[str] = None
+    importador: Optional[str] = None
+    cnpj_importador: Optional[str] = None
+    endereco_importador: Optional[str] = None
+    data_no_sistema: Optional[date] = None
+    urf_entrada: Optional[str] = None
+    rcr: Optional[str] = None
+    peso_liquido: Optional[Decimal] = None
+    tipos_embalagem: Optional[Decimal] = None
+    taxa_dolar: Optional[Decimal] = None
+    versao: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class ItemDiDueSchema(BaseModel):
+    id: int
+    di_duimp_id: int
+    seq_item: str
+    adicao: Optional[str] = None
+    ncm: Optional[str] = None
+    partnumber: Optional[str] = None
+    quantidade_comercial: Optional[Decimal] = None
+    valor_unitario: Optional[Decimal] = None
+    total_na_moeda: Optional[Decimal] = None
+    moeda_fob: Optional[str] = None
+    descricao_mercadoria: Optional[str] = None
+    valor_ii: Optional[Decimal] = None
+    valor_ipi: Optional[Decimal] = None
+    valor_pis: Optional[Decimal] = None
+    valor_cofins: Optional[Decimal] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class AiMemorySchema(BaseModel):
+    id: int
+    question: str
+    sql_query: str
+    usage_count: int
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class AskAiRequest(BaseModel):
+    question: str
+
+class AskAiResponse(BaseModel):
+    answer: str
+    sql: str
+
+class TaxaMoedaSchema(BaseModel):
+    moeda: str
+    taxa: Optional[Decimal] = None

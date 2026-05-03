@@ -1,0 +1,72 @@
+import streamlit as st
+import os
+from PIL import Image
+from views import login_view, importacao_view, di_due_view, produto_view, assistente_ia_view
+
+# 1. Configurações da Página
+st.set_page_config(page_title="PGA-360 | Gestão Aduaneira", page_icon="🚢", layout="wide")
+
+# 2. Inicialização de Estados Globais
+if "auth_token" not in st.session_state:
+    st.session_state.auth_token = None
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "Home"
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# 3. Função da Sidebar (Só aparece se logado)
+def render_sidebar():
+    with st.sidebar:
+        # Logo Centralizado
+        try:
+            logo = Image.open("assets/logo_pga360_neg.png")
+            st.image(logo, use_column_width=True)
+        except:
+            st.title("🚢 PGA-360")
+        
+        st.divider()
+        st.subheader("📂 Fases Aduaneiras")
+        st.button("📦 Embarque...", disabled=True, use_container_width=True)
+        st.button("📄 Invoice...", disabled=True, use_container_width=True)
+        
+        if st.button("📥 Importação", use_container_width=True):
+            st.session_state.current_page = "Importacao"
+            st.rerun()
+            
+        st.button("💰 Financeiro...", disabled=True, use_container_width=True)
+        st.divider()
+        
+        if st.button("🤖 Assistente de IA", use_container_width=True):
+            st.session_state.current_page = "IA"
+            st.rerun()
+
+        st.sidebar.divider()
+        if st.button("🚪 Logout"):
+            st.session_state.auth_token = None
+            st.session_state.current_page = "Home"
+            st.rerun()
+
+# 4. Controle de Fluxo (Login vs Sistema)
+def main():
+    if st.session_state.auth_token is None:
+        # PÁGINA DE ACESSO
+        login_view.render()
+    else:
+        # PÁGINA OPERACIONAL
+        render_sidebar()
+        page = st.session_state.current_page
+        
+        if page == "Home":
+            st.title("Bem-vindo ao PGA-360")
+            st.info("Utilize o menu lateral para navegar pelas operações de Importação.")
+        elif page == "Importacao":
+            importacao_view.render()
+        elif page == "di_due":
+            di_due_view.render()
+        elif page == "Produto":
+            produto_view.render()
+        elif page == "IA":
+            assistente_ia_view.render()
+
+if __name__ == "__main__":
+    main()

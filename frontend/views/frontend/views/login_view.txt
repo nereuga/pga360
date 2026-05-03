@@ -1,0 +1,67 @@
+import streamlit as st
+from supabase import create_client, Client
+import os
+import requests
+
+# Configurações do Supabase
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    st.title("🔒 Acesso ao Sistema PGA-360")
+    
+    aba_login, aba_registro = st.tabs(["Fazer Login", "Solicitar Acesso"])
+
+    with aba_login:
+        with st.form("form_login"):
+            email = st.text_input("E-mail corporativo")
+            password = st.text_input("Senha", type="password")
+            btn_login = st.form_submit_button("Entrar", use_container_width=True)
+
+            if btn_login:
+                try:
+                    # Tenta autenticar no Supabase
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    # Se logou no Supabase, guardamos o token
+                    st.session_state.auth_token = res.session.access_token
+                    st.session_state.user_email = email
+                    st.success("Autenticado com sucesso! Carregando dados...")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao entrar: Verifique suas credenciais.")
+
+    with aba_registro:
+        st.markdown("### Etapa 1: Registro de Usuário")
+        with st.form("form_registro"):
+            new_email = st.text_input("E-mail corporativo")
+            new_password = st.text_input("Crie uma senha (mín. 6 caracteres)", type="password")
+            perfil_desejado = st.selectbox("Perfil solicitado", ["consulta", "operacional", "diretoria"])
+            
+            btn_reg = st.form_submit_button("Enviar Solicitação de Credenciamento")
+
+            if btn_reg:
+                try:
+                    # 1. Cria usuário no Supabase
+                    res = supabase.auth.sign_up({"email": new_email, "password": new_password})
+                    uid = res.user.id
+                    
+                    # 2. Notifica o Backend para criar o perfil local (Etapa 2 - Pendente)
+                    # Nota: Aqui fazemos uma chamada ao backend para registrar a intenção
+                    reg_res = requests.post(
+                        f"{API_URL}/auth/registrar-perfil", 
+                        json={
+                            "supabase_uid": uid,
+                            "email": new_email,
+                            "perfil": perfil_desejado
+                        }
+                    )
+                    
+                    if reg_res.status_code == 200:
+                        st.success("✅ Etapa 1 concluída! Verifique seu e-mail para confirmar a conta.")
+                        st.info("⚠️ Etapa 2: Após confirmar o e-mail, seu acesso precisará ser aprovado por um administrador.")
+                    else:
+                        st.error("Erro ao registrar perfil na base local.")
+                except Exception as e:
+                    st.error(f"Erro no cadastro: {str(e)}")

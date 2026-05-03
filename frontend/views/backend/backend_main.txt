@@ -1,0 +1,172 @@
+from fastapi import FastAPI, Depends, HTTPException, Security
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import text, distinct, func
+from sqlalchemy.exc import IntegrityError
+import os
+import json
+import subprocess
+import google.generativeai as genai
+from datetime import date, datetime
+from typing import List, Optional
+
+# Importações dos módulos internos
+import models, database, schemas
+from auth import get_current_user
+from utils.report_engine import ReportEngine
+
+app = FastAPI(title="PGA-360 API Gateway Professional")
+
+# --- CONFIGURAÇÃO DO MOTOR DE IA (GEMINI) ---
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+def get_ai_model():
+    """Lógica de descoberta dinâmica do modelo para evitar erro 404"""
+    try:
+        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        model_name = next((n for n in available if "gemini-1.5-flash" in n), available[0])
+        return genai.GenerativeModel(model_name)
+    except:
+        return genai.GenerativeModel('models/gemini-1.5-flash')
+
+# ==========================================================
+# SEÇÃO 1: ROTAS PÚBLICAS E AUTENTICAÇÃO
+# ==========================================================
+
+@app.get("/health")
+def health():
+    return {"status": "online", "app": "PGA-360", "timestamp": datetime.now()}
+
+@app.post("/auth/registrar-perfil")
+def registrar_perfil(obj: schemas.UserRegister, db: Session = Depends(database.get_db)):
+    """Cria o perfil local do usuário para aprovação (Etapa 2)"""
+    try:
+        db_user = models.UsuarioPerfil(
+            supabase_uid=obj.supabase_uid,
+            email=obj.email,
+            perfil=obj.perfil,
+            is_aprovado=False 
+        )
+        db.add(db_user)
+        db.commit()
+        return {"status": "success", "message": "Aguardando aprovação manual da diretoria."}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Usuário já registrado.")
+
+# ==========================================================
+# SEÇÃO 2: GESTÃO OPERACIONAL (DI/DUE E ITENS) - ATUALIZADA
+# ==========================================================
+
+@app.get("/importacoes", response_model=List[schemas.DiDueListSchema])
+def list_importacoes(
+    data_reg_ini: Optional[date] = None, data_reg_fim: Optional[date] = None,
+    data_des_ini: Optional[date] = None, data_des_fim: Optional[date] = None, # NOVO: Suporte a filtro de Desembaraço
+    numero: Optional[str] = None, 
+    regime: Optional[str] = None,
+    modal: Optional[str] = None, 
+    canal: Optional[str] = None, # NOVO: Suporte a filtro de Canal
+    skip: int = 0, limit: int = 30,
+    db: Session = Depends(database.get_db),
+    current_user: models.UsuarioPerfil = Depends(get_current_user)
+):
+    query = db.query(models.DiDue)
+    
+    # 1. Filtros de Data de Registro (Mantido o que já funcionava)
+    if data_reg_ini: query = query.filter(models.DiDue.data_registro >= data_reg_ini)
+    if data_reg_fim: query = query.filter(models.DiDue.data_registro <= data_reg_fim)
+    
+    # 2. Filtros de Data de Desembaraço (Implementação solicitada)
+    if data_des_ini: query = query.filter(models.DiDue.data_desembaraco >= data_des_ini)
+    if data_des_fim: query = query.filter(models.DiDue.data_desembaraco <= data_des_fim)
+    
+    # 3. Filtro de Número (Mantido o que já funcionava)
+    if numero: query = query.filter(models.DiDue.di_due.ilike(f"%{numero}%"))
+    
+    # 4. Filtro de Regime (Ajustado para ser compatível com as VIEWS)
+    if regime: query = query.filter(models.DiDue.regime == regime)
+    
+    # 5. Filtro de Modal (Melhorado para ILIKE para capturar strings como '(Z1)OCEAN-CONTAINER')
+    if modal: query = query.filter(models.DiDue.modal.ilike(f"%{modal}%"))
+    
+    # 6. Filtro de Canal (Implementação solicitada)
+    if canal: query = query.filter(models.DiDue.canal == canal)
+    
+    return query.order_by(models.DiDue.data_registro.desc()).offset(skip).limit(limit).all()
+
+# ==========================================================
+# SEÇÃO 3: MOTOR DE INTELIGÊNCIA ARTIFICIAL (TEXT-TO-SQL)
+# ==========================================================
+
+@app.post("/ask-ai", response_model=schemas.AskAiResponse)
+def ask_ai(payload: schemas.AskAiRequest, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    model = get_ai_model()
+    
+    # 1. Recupera Memória e Regras
+    memoria = db.query(models.AiMemory).order_by(models.AiMemory.usage_count.desc()).limit(5).all()
+    sinonimos = db.query(models.Sinonimos).all()
+    kpis = db.query(models.KpiDefinitions).all()
+    
+    prompt_base = f"""
+    Você é um especialista em SQL para o sistema COMEX PGA-360.
+    Tabelas principais: 'di_due' e 'item_di_due'.
+    Histórico de sucesso: {str([{"q": m.question, "sql": m.sql_query} for m in memoria])}
+    Regras de Negócio: {str([{"campo": s.campo_tecnico, "termos": s.termos} for s in sinonimos])}
+    
+    Instrução: Retorne APENAS o SQL PostgreSQL puro. Use ILIKE para textos.
+    Pergunta: {payload.question}
+    """
+    
+    try:
+        # 2. Gera e executa SQL
+        sql_gerado = model.generate_content(prompt_base).text.strip().replace("```sql", "").replace("```", "")
+        
+        try:
+            result = db.execute(text(sql_gerado))
+            rows = [dict(r._mapping) for r in result]
+        except Exception as sql_err:
+            # AUTO-CORREÇÃO (Self-healing)
+            fix_prompt = f"O SQL {sql_gerado} falhou com erro {str(sql_err)}. Corrija o SQL."
+            sql_gerado = model.generate_content(fix_prompt).text.strip().replace("```sql", "").replace("```", "")
+            result = db.execute(text(sql_gerado))
+            rows = [dict(r._mapping) for r in result]
+
+        # 3. Atualiza Memória de Sucesso
+        if rows:
+            mem = db.query(models.AiMemory).filter(models.AiMemory.question == payload.question).first()
+            if mem: mem.usage_count += 1
+            else: db.add(models.AiMemory(question=payload.question, sql_query=sql_gerado))
+            db.commit()
+
+        # 4. Humanização da Resposta
+        final_ans = model.generate_content(f"O banco retornou: {str(rows)}. Explique isso estrategicamente para a pergunta: {payload.question}").text
+        return {"answer": final_ans, "sql": sql_gerado}
+
+    except Exception as e:
+        return {"answer": f"Erro analítico: {str(e)}", "sql": "falhou"}
+
+# ==========================================================
+# SEÇÃO 4: ADMINISTRAÇÃO E EXPORTAÇÃO
+# ==========================================================
+
+@app.get("/admin/ai-history", response_model=List[schemas.AiMemorySchema])
+def get_ai_history(search: Optional[str] = None, db: Session = Depends(database.get_db), current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    query = db.query(models.AiMemory)
+    if search: query = query.filter(models.AiMemory.question.ilike(f"%{search}%"))
+    return query.order_by(models.AiMemory.usage_count.desc()).all()
+
+@app.post("/admin/sync-oracle")
+def sync_oracle(current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    if current_user.perfil not in ["admin", "diretoria"]: raise HTTPException(403)
+    subprocess.Popen(["python", "seed.py"])
+    return {"status": "Sincronização com Oracle 8i iniciada em background."}
+
+@app.post("/exportar/pdf")
+async def export_pdf(payload: dict, current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    pdf_buffer = ReportEngine.generate_pdf(payload.get("data", []), payload.get("title", "Relatorio"))
+    return StreamingResponse(pdf_buffer, media_type="application/pdf")
+
+@app.post("/exportar/excel")
+async def export_excel(payload: dict, current_user: models.UsuarioPerfil = Depends(get_current_user)):
+    excel_buffer = ReportEngine.generate_excel(payload.get("data", []))
+    return StreamingResponse(excel_buffer, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

@@ -1,0 +1,888 @@
+#### ARQUIVOS DA PASTA frontend DA APP
+
+1 - frontend/Dockerfile
+2 - frontend/main.py
+3 - frontend/requirements.txt
+4 - frontend/assets/logo_pga360_neg.png
+5 - frontend/views/__init__.py
+6 - frontend/views/assistente_ia_view.py
+7 - frontend/views/biblioteca_insights_view.py
+8 - frontend/views/di_due_view.py
+9 - frontend/views/home_view.py
+10 - frontend/views/importacao_view.py
+11 - frontend/views/login_view.py
+12 - produto_view.py
+
+*** 1 - frontend/Dockerfile
+
+FROM python:3.9-slim
+
+# Evita arquivos .pyc e garante logs imediatos
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Instala dependências
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia o código da aplicação e a pasta de views
+COPY . .
+
+# Expõe a porta padrão do Streamlit
+EXPOSE 8501
+
+# Comando de inicialização apontando para o novo main.py
+CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+
+*** 2 - frontend/main.py
+
+import streamlit as st
+import os
+from PIL import Image
+# Importação de todas as views, incluindo a nova Biblioteca
+from views import (
+    login_view, 
+    importacao_view, 
+    di_due_view, 
+    produto_view, 
+    assistente_ia_view, 
+    biblioteca_insights_view
+)
+
+# 1. Configurações da Página
+st.set_page_config(
+    page_title="PGA-360 | Gestão Aduaneira Inteligente", 
+    page_icon="🚢", 
+    layout="wide"
+)
+
+# 2. Inicialização de Estados Globais (Contexto de Sessão)
+if "auth_token" not in st.session_state:
+    st.session_state.auth_token = None
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "Home"
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None # Para reuso da Biblioteca de Insights
+
+# 3. Função da Sidebar (Painel de Navegação Lateral)
+def render_sidebar():
+    with st.sidebar:
+        # Logo Centralizado
+        try:
+            # Pasta assets deve existir no diretório frontend
+            logo = Image.open("assets/logo_pga360_neg.png")
+            st.image(logo, use_column_width=True)
+        except:
+            st.title("🚢 PGA-360")
+        
+        st.divider()
+        
+        # Menu: Fluxo de Operações
+        st.subheader("🔄 Fases Aduaneiras")
+        st.button("📦 Embarque...", disabled=True, use_container_width=True)
+        st.button("📄 Invoice...", disabled=True, use_container_width=True)
+        
+        if st.button("📥 Importação (DI/DUE)", use_container_width=True):
+            st.session_state.current_page = "Importacao"
+            st.rerun()
+            
+        st.button("💰 Financeiro...", disabled=True, use_container_width=True)
+        
+        st.divider()
+        
+        # Menu: Inteligência e Dados
+        st.subheader("🤖 Inteligência Analítica")
+        if st.button("💬 Assistente de IA", use_container_width=True):
+            st.session_state.current_page = "IA"
+            st.rerun()
+
+        if st.button("📚 Biblioteca de Insights", use_container_width=True):
+            st.session_state.current_page = "Biblioteca"
+            st.rerun()
+
+        st.sidebar.divider()
+        
+        # Rodapé da Sidebar: Info do Usuário e Logout
+        if st.session_state.auth_token:
+            st.caption(f"Logado como: {st.session_state.get('user_email', 'Usuário')}")
+            if st.button("🚪 Sair do Sistema", use_container_width=True):
+                # Limpa todo o estado para segurança
+                st.session_state.auth_token = None
+                st.session_state.chat_history = []
+                st.session_state.current_page = "Home"
+                st.rerun()
+
+# 4. Controle de Fluxo (Roteamento de Páginas)
+def main():
+    if st.session_state.auth_token is None:
+        # ETAPA 1: Autenticação Supabase
+        login_view.render()
+    else:
+        # ETAPA 2: Acesso ao Sistema Operacional
+        render_sidebar()
+        page = st.session_state.current_page
+        
+        if page == "Home":
+            st.title("Bem-vindo ao PGA-360")
+            st.info("Utilize o menu lateral para gerenciar as operações ou consultar a inteligência de dados.")
+            st.markdown("""
+            ### Resumo do Ambiente
+            - **Base de Dados:** PostgreSQL (Sincronizada via ETL Oracle)
+            - **IA:** Motor Gemini 1.5 (Analítico)
+            - **Segurança:** Supabase Auth + Aprovação Manual
+            """)
+            
+        elif page == "Importacao":
+            importacao_view.render()
+            
+        elif page == "di_due":
+            di_due_view.render()
+            
+        elif page == "Produto":
+            produto_view.render()
+            
+        elif page == "IA":
+            assistente_ia_view.render()
+            
+        elif page == "Biblioteca":
+            biblioteca_insights_view.render()
+
+if __name__ == "__main__":
+    main()
+
+*** 3 - frontend/requirements.txt
+
+streamlit==1.28.2
+requests==2.31.0
+pandas==2.1.3
+plotly==5.18.0
+supabase==2.3.0
+Pillow==10.2.0
+
+*** 4 - frontend/assets/logo_pga360_neg.png
+
+figura de logo
+
+*** 5 - frontend/views/__init__.py
+arquivo vazio
+
+*** 6 - frontend/views/assistente_ia_view.py
+
+import streamlit as st
+import requests
+import os
+import json
+import plotly.express as px
+
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    st.title("🤖 Assistente de IA Analítico")
+    st.markdown("Consulte a base de dados via linguagem natural e gere insights instantâneos.")
+
+    # Cabeçalho de Autenticação
+    headers = {"Authorization": f"Bearer {st.session_state.auth_token}"}
+
+    # Lógica de Reuso da Biblioteca:
+    # Se existir uma pergunta pendente, o chat inicia com ela automaticamente
+    if st.session_state.get("pending_question"):
+        prompt = st.session_state.pending_question
+        st.session_state.pending_question = None # Limpa para a próxima
+    else:
+        prompt = st.chat_input("Ex: Qual o valor total de impostos por canal em 2024?")
+
+    if prompt:
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        
+        with st.spinner("IA traduzindo para SQL e analisando dados..."):
+            try:
+                res = requests.post(f"{API_URL}/ask-ai", headers=headers, json={"question": prompt}).json()
+                
+                # Processamento de Gráficos (Output Parsing)
+                full_text = res['answer']
+                chart_obj = None
+                if "DATA_CHART:" in full_text:
+                    parts = full_text.split("DATA_CHART:")
+                    main_msg = parts[0].strip()
+                    try:
+                        chart_obj = json.loads(parts[1].strip())
+                    except: chart_obj = None
+                else:
+                    main_msg = full_text
+
+                st.session_state.chat_history.append({
+                    "role": "assistant", 
+                    "content": main_msg,
+                    "sql": res.get('sql'),
+                    "chart": chart_obj
+                })
+            except Exception as e:
+                st.error(f"Erro na IA: {e}")
+
+    # Renderização do Histórico
+    for m in st.session_state.chat_history:
+        with st.chat_message(m["role"]):
+            st.write(m["content"])
+            
+            # Se houver gráfico
+            if m.get("chart"):
+                c = m["chart"]
+                if c["type"] == "pie":
+                    st.plotly_chart(px.pie(names=c["labels"], values=c["values"], hole=0.4), use_container_width=True)
+                elif c["type"] == "bar":
+                    st.plotly_chart(px.bar(x=c["labels"], y=c["values"]), use_container_width=True)
+            
+            # Se houver SQL (Transparência para a TI)
+            if m.get("sql"):
+                with st.expander("👁️ Ver lógica SQL aplicada"):
+                    st.code(m["sql"], language="sql")
+
+*** 7 - frontend/views/biblioteca_insights_view.py
+
+import streamlit as st
+import requests
+import os
+import pandas as pd
+
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    st.title("📚 Biblioteca de Insights")
+    st.markdown("Reutilize consultas e análises estratégicas já validadas pelo sistema.")
+
+    headers = {"Authorization": f"Bearer {st.session_state.auth_token}"}
+
+    # --- 1. PAINEL DE CONTROLE (SYNC) ---
+    with st.expander("⚙️ Painel de Controle de Dados", expanded=False):
+        st.subheader("Sincronização com Oracle 8i")
+        st.write("Última atualização: Hoje às 06:00 (Agendado)")
+        if st.button("🔄 Forçar Sincronização Agora", type="primary"):
+            with st.spinner("Solicitando carga ao motor de ETL..."):
+                res = requests.post(f"{API_URL}/admin/sync-oracle", headers=headers)
+                if res.status_code == 200:
+                    st.success(res.json()['status'])
+                else:
+                    st.error("Erro ao disparar sincronização.")
+
+    st.divider()
+
+    # --- 2. FILTRO DE CONSULTAS ANTERIORES ---
+    st.subheader("🔍 Pesquisar no Histórico de Inteligência")
+    busca = st.text_input("Filtrar por termo (ex: Halliburton, Canal Vermelho, Impostos...)")
+
+    try:
+        res = requests.get(f"{API_URL}/admin/ai-history", headers=headers, params={"search": busca})
+        if res.status_code == 200:
+            history_data = res.json()
+            if history_data:
+                df_hist = pd.DataFrame(history_data)
+                
+                # Exibição elegante das consultas
+                for _, row in df_hist.iterrows():
+                    with st.container(border=True):
+                        c1, c2 = st.columns([4, 1])
+                        c1.write(f"**Pergunta:** {row['question']}")
+                        c1.caption(f"Frequência de uso: {row['usage_count']} vezes")
+                        
+                        # Botão para reutilizar a pergunta
+                        if c2.button("🔁 Reutilizar", key=f"reuse_{row['id']}"):
+                            # Injeta a pergunta no chat da IA e redireciona
+                            st.session_state.pending_question = row['question']
+                            st.session_state.current_page = "IA"
+                            st.rerun()
+                            
+                        with st.expander("Ver lógica SQL aplicada"):
+                            st.code(row['sql_query'], language="sql")
+            else:
+                st.info("Nenhuma consulta encontrada com este termo.")
+    except Exception as e:
+        st.error(f"Erro ao carregar biblioteca: {e}")
+
+
+*** 8 - frontend/views/di_due_view.py
+
+import streamlit as st
+import requests
+import pandas as pd
+import os
+
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    di_id = st.session_state.selected_di_id
+    
+    if not di_id:
+        st.warning("Nenhum processo selecionado.")
+        if st.button("Ir para lista de Importação"):
+            st.session_state.current_page = "Importacao"
+            st.rerun()
+        return
+
+    # --- 1. BUSCA DE DADOS ---
+    try:
+        # Busca Capa
+        res_di = requests.get(f"{API_URL}/di-due/{di_id}")
+        if res_di.status_code != 200:
+            st.error("Erro ao carregar detalhes da DI.")
+            return
+        di = res_di.json()
+        
+        # Busca Itens (para Aba 3 e Taxas)
+        res_itens = requests.get(f"{API_URL}/di-due/{di_id}/produtos")
+        itens = res_itens.json() if res_itens.status_code == 200 else []
+        
+        # Busca Taxas Distintas (Sub-aba 2.1)
+        res_taxas = requests.get(f"{API_URL}/di-due/{di_id}/taxas-moedas")
+        taxas_negociadas = res_taxas.json() if res_taxas.status_code == 200 else []
+
+    except Exception as e:
+        st.error(f"Falha de conexão: {e}")
+        return
+
+    # --- 2. TOPO: BOTÃO VOLTAR E CABEÇALHO (REQUISITO 4.3) ---
+    col_v1, col_v2 = st.columns([1, 8])
+    if col_v1.button("⬅️ Voltar"):
+        st.session_state.current_page = "Importacao"
+        st.rerun()
+    
+    with st.container(border=True):
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Tipo DI", di.get('tipo_di'))
+        c2.metric("DI/DUE", di.get('di_due'))
+        c3.write(f"**CNPJ Importador**  \n{di.get('cnpj_importador')}")
+        c4.write(f"**Importador**  \n{di.get('importador')}")
+        c5.write(f"**Regime Aduaneiro**  \n{di.get('regime')}")
+        c6.write(f"**Versão**  \n{di.get('versao')}")
+
+    # --- 3. TABELA PRINCIPAL COM ABAS ---
+    aba1, aba2, aba3 = st.tabs(["📄 DI/DUIMP", "📊 Resumo Importação", "📦 Produtos"])
+
+    # --- CONTEÚDO ABA 1: DI/DUIMP ---
+    with aba1:
+        sub_aba1_1, sub_aba1_2, sub_aba1_3 = st.tabs(["Dados Principais", "Dados de Carga", "Tipos Embalagem"])
+        
+        with sub_aba1_1:
+            col_a, col_b, col_c = st.columns(3)
+            col_a.text_input("Endereço", value=di.get('endereco_importador'), disabled=True)
+            col_b.text_input("Canal", value=di.get('canal'), disabled=True)
+            col_c.text_input("Regime Aduaneiro", value=di.get('regime'), disabled=True)
+            
+            col_d, col_e, col_f = st.columns(3)
+            col_d.date_input("Data Embarque (ATD)", value=pd.to_datetime(di.get('data_atd')), disabled=True)
+            col_e.date_input("Data Chegada (ATA)", value=pd.to_datetime(di.get('data_ata')), disabled=True)
+            col_f.date_input("Data no Sistema", value=pd.to_datetime(di.get('data_no_sistema')), disabled=True)
+            
+            col_g, col_h = st.columns(2)
+            col_g.date_input("Data Registro", value=pd.to_datetime(di.get('data_registro')), disabled=True)
+            col_h.date_input("Data Desembaraço", value=pd.to_datetime(di.get('data_desembaraco')), disabled=True)
+
+        with sub_aba1_2:
+            col_i, col_j, col_k = st.columns(3)
+            col_i.text_input("RCR / Termo Resp.", value=di.get('rcr'), disabled=True)
+            col_j.text_input("Unidade Entrada/Despacho", value=di.get('urf_entrada'), disabled=True)
+            col_k.text_input("Unidade Despacho", value=di.get('unidade_despacho'), disabled=True)
+            
+            col_l, col_m, col_n = st.columns(3)
+            col_l.text_input("Recinto Alfandegado", value=di.get('recinto'), disabled=True)
+            col_m.text_input("Bandeira", value=di.get('bandeira'), disabled=True)
+            col_n.text_input("AWB Master", value=di.get('awb_master'), disabled=True)
+            
+            col_o, col_p, col_q = st.columns(3)
+            col_o.text_input("AWB House", value=di.get('awb_house'), disabled=True)
+            col_p.text_input("País Procedência", value=di.get('pais_procedencia'), disabled=True)
+            col_q.text_input("Local Embarque", value=di.get('local_embarque'), disabled=True)
+            
+            col_r, col_s = st.columns(2)
+            col_r.metric("Peso Bruto (KG)", f"{di.get('peso_bruto'):,.3f}")
+            col_s.metric("Peso Líquido (KG)", f"{di.get('peso_liquido'):,.3f}")
+
+        with sub_aba1_3:
+            st.info(f"Quantidade total de volumes/embalagens: **{di.get('tipos_embalagem')}**")
+
+    # --- CONTEÚDO ABA 2: RESUMO IMPORTAÇÃO ---
+    with aba2:
+        sub_aba2_1, sub_aba2_2 = st.tabs(["Taxas Cambiais", "Resumo Comercial"])
+        
+        with sub_aba2_1:
+            c_t1, c_t2, c_t3 = st.columns(3)
+            c_t1.write(f"**Data Conversão:** {di.get('data_registro')}")
+            c_t2.metric("Taxa Dólar", f"{di.get('taxa_dolar'):,.4f}")
+            c_t3.metric("Taxa Real", "1.0000")
+            
+            st.write("**Moedas Negociadas nos Itens:**")
+            if taxas_negociadas:
+                st.table(pd.DataFrame(taxas_negociadas))
+
+        with sub_aba2_2:
+            st.caption(f"Ref: {di.get('di_due')} | Incoterm: {di.get('incoterm')}")
+            sub_sub_aba1, sub_sub_aba2 = st.tabs(["Valores Comerciais", "Impostos"])
+            
+            with sub_sub_aba1:
+                # Montagem da matriz de valores (Requisito 4.2.2.1)
+                t_dolar = float(di.get('taxa_dolar') or 1)
+                data_comercial = [
+                    ["Produto", "USD", di.get('total_fob'), di.get('total_fob'), float(di.get('total_fob')) * t_dolar],
+                    ["Frete", "USD", di.get('total_frete'), di.get('total_frete'), float(di.get('total_frete')) * t_dolar],
+                    ["Seguro", "USD", di.get('total_seguro'), di.get('total_seguro'), float(di.get('total_seguro')) * t_dolar]
+                ]
+                df_comercial = pd.DataFrame(data_comercial, columns=["Rubrica", "Moeda", "Negociado", "Total Dólar", "Total Real"])
+                st.table(df_comercial)
+
+            with sub_sub_aba2:
+                # Matriz de Impostos (Requisito 4.2.2.2)
+                data_impostos = [
+                    ["II", di.get('total_fob'), di.get('valor_ii'), di.get('valor_ii_devido'), di.get('valor_ii_recolher')],
+                    ["IPI", di.get('total_fob'), di.get('valor_ipi'), di.get('valor_ipi_devido'), di.get('valor_ipi_recolher')],
+                    ["PIS", di.get('total_fob'), di.get('valor_pis'), di.get('valor_pis_devido'), di.get('valor_pis_recolher')],
+                    ["COFINS", di.get('total_fob'), di.get('valor_cofins'), di.get('valor_cofins_devido'), di.get('valor_cofins_recolher')]
+                ]
+                df_impostos = pd.DataFrame(data_impostos, columns=["Tributo", "Base Cálculo", "Calculado", "Devido", "A Recolher"])
+                st.table(df_impostos)
+
+    # --- CONTEÚDO ABA 3: PRODUTOS ---
+    with aba3:
+        st.subheader("Itens da Declaração")
+        if itens:
+            df_itens = pd.DataFrame(itens)
+            # Criamos uma exibição customizada com botão para cada item
+            for _, row in df_itens.iterrows():
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([1, 2, 4, 1])
+                    c1.write(f"**Seq:** {row['seq_item']}")
+                    c2.write(f"**NCM:** {row['ncm']}")
+                    c3.write(f"**Descrição:** {row['descricao_mercadoria'][:100]}...")
+                    if c4.button("🔍 Ver Produto", key=f"btn_item_{row['id']}"):
+                        st.session_state.selected_item_id = row['id']
+                        st.session_state.current_page = "Produto"
+                        st.rerun()
+        else:
+            st.info("Nenhum item vinculado a esta DI.")
+
+*** 9 - frontend/views/home_view.py
+
+import streamlit as st
+
+def render():
+    st.title("🚢 PGA-360 | Gestão Aduaneira")
+    st.subheader("Bem-vindo ao centro de comando operacional.")
+    
+    st.divider()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.container(border=True):
+            st.markdown("### 📊 Status do Ambiente")
+            st.success("Conectado à Nuvem (PostgreSQL)")
+            st.success("Conectado à Intranet (Oracle 8i)")
+            st.info("Última sincronização ETL: Hoje às 06:00")
+            
+    with col2:
+        with st.container(border=True):
+            st.markdown("### 🤖 Sugestão da IA (Insight Ativo)")
+            st.warning("⚠️ Detectamos 3 processos em Canal Vermelho com Lead Time acima da média histórica.")
+            if st.button("Analisar Atrasos"):
+                st.session_state.pending_question = "Quais processos em canal vermelho estão com lead time de despacho acima da média?"
+                st.session_state.current_page = "IA"
+                st.rerun()
+
+*** 10 - frontend/views/importacao_view.py
+
+import streamlit as st
+import requests
+import pandas as pd
+import os
+from datetime import datetime
+
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    st.title("📥 IMPORTAÇÃO")
+
+    # --- 1. INICIALIZAÇÃO DE ESTADO DE FILTROS E PAGINAÇÃO ---
+    if "filter_params" not in st.session_state:
+        st.session_state.filter_params = {
+            "data_reg_ini": None, "data_reg_fim": None,
+            "data_des_ini": None, "data_des_fim": None,
+            "numero": "", "regime": "Todos", "modal": "Todos", "canal": "Todos"
+        }
+    if "limit_list" not in st.session_state:
+        st.session_state.limit_list = 30
+
+    # Preparação do Header de Autenticação (Requisito de Segurança Passo 11/12)
+    headers = {"Authorization": f"Bearer {st.session_state.auth_token}"}
+
+    # --- 2. FORMULÁRIO DE FILTROS ---
+    with st.container(border=True):
+        col1, col2, col3, col4 = st.columns(4)
+        f_reg_ini = col1.date_input("Data Registro Inicial", value=None)
+        f_reg_fim = col2.date_input("Data Registro Final", value=None)
+        f_des_ini = col3.date_input("Data Desembaraço Inicial", value=None)
+        f_des_fim = col4.date_input("Data Desembaraço Final", value=None)
+
+        col5, col6, col7, col8 = st.columns(4)
+        f_numero = col5.text_input("Número DI/DUIMP", placeholder="Ex: 24/...")
+        f_regime = col6.selectbox("Regime", ["Todos", "CONSUMO", "ADMISSAO TEMPORARIA", "DRAWBACK"])
+        f_modal = col7.selectbox("Modal", ["Todos", "(Z1)OCEAN-CONTAINER", "(Z2)AIR", "(Z3)ROAD"])
+        f_canal = col8.selectbox("Canal", ["Todos", "Verde", "Amarelo", "Vermelho", "Cinza"])
+
+        btn_col1, btn_col2, _ = st.columns([1, 1, 4])
+        if btn_col1.button("🔍 Consultar", use_container_width=True, type="primary"):
+            st.session_state.filter_params = {
+                "data_reg_ini": f_reg_ini, "data_reg_fim": f_reg_fim,
+                "data_des_ini": f_des_ini, "data_des_fim": f_des_fim,
+                "numero": f_numero, "regime": f_regime, "modal": f_modal, "canal": f_canal
+            }
+            st.session_state.limit_list = 30 
+            st.rerun()
+
+        if btn_col2.button("🧹 Limpar Filtro", use_container_width=True):
+            for key in st.session_state.filter_params:
+                st.session_state.filter_params[key] = None if "data" in key else "Todos"
+            st.session_state.limit_list = 30
+            st.rerun()
+
+    # --- 3. BUSCA DE DADOS VIA API (COM TOKEN) ---
+    params = st.session_state.filter_params
+    clean_params = {k: (v if v != "Todos" else None) for k, v in params.items()}
+    clean_params["limit"] = st.session_state.limit_list
+
+    data = []
+    try:
+        # Note o uso de headers=headers para passar o Token JWT
+        response = requests.get(f"{API_URL}/importacoes", params=clean_params, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+        elif response.status_code == 403:
+            st.error("Acesso Negado: Usuário ainda não aprovado na Etapa 2.")
+        else:
+            st.error(f"Erro ao consultar base: {response.text}")
+    except Exception as e:
+        st.error(f"Falha de conexão com o backend: {e}")
+
+    # --- 4. TABELA DE RESULTADOS ---
+    if data:
+        df = pd.DataFrame(data)
+        df_display = df.rename(columns={
+            "di_due": "Número DI/DUIMP",
+            "tipo_di": "Tipo",
+            "cnpj_importador": "CNPJ",
+            "importador": "Importador",
+            "data_registro": "Data Registro",
+            "data_desembaraco": "Data Desembaraço"
+        })
+
+        st.subheader("Lista de Declarações Localizadas")
+        event = st.dataframe(
+            df_display,
+            column_order=("Número DI/DUIMP", "Tipo", "CNPJ", "Importador", "Data Registro", "Data Desembaraço"),
+            hide_index=True,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+
+        if event.selection.rows:
+            selected_index = event.selection.rows[0]
+            st.session_state.selected_di_id = df.iloc[selected_index]['id']
+            st.session_state.current_page = "di_due"
+            st.rerun()
+
+        if len(data) >= st.session_state.limit_list:
+            if st.button(f"Mostrar mais 50 registros..."):
+                st.session_state.limit_list += 50
+                st.rerun()
+    else:
+        st.info("Nenhum registro encontrado para os filtros aplicados.")
+
+    # --- 5. BOTÕES DE RODAPÉ E EXPORTAÇÃO (MERGE PASSO 13) ---
+    st.divider()
+    footer_col1, footer_col2, footer_col3, _ = st.columns([1.5, 1.5, 1, 3])
+    
+    # Botão de Exportação PDF
+    if footer_col1.button("📄 Gerar Relatório (PDF)", use_container_width=True):
+        if data:
+            with st.spinner("Gerando arquivo profissional..."):
+                try:
+                    res_pdf = requests.post(
+                        f"{API_URL}/exportar/pdf", 
+                        headers=headers, 
+                        json={"data": data, "title": "Lista_Importacoes_PGA360"}
+                    )
+                    if res_pdf.status_code == 200:
+                        st.download_button(
+                            label="📥 Baixar PDF",
+                            data=res_pdf.content,
+                            file_name=f"pga360_importacao_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+                    else:
+                        st.error("Erro do servidor ao gerar PDF.")
+                except Exception as e:
+                    st.error(f"Erro na exportação: {e}")
+        else:
+            st.warning("Não há dados na lista para exportar.")
+
+    # Botão de Exportação Excel
+    if footer_col2.button("📊 Gerar Planilha (XLSX)", use_container_width=True):
+        if data:
+            with st.spinner("Preparando Excel..."):
+                try:
+                    res_xls = requests.post(
+                        f"{API_URL}/exportar/excel", 
+                        headers=headers, 
+                        json={"data": data}
+                    )
+                    if res_xls.status_code == 200:
+                        st.download_button(
+                            label="📥 Baixar Excel",
+                            data=res_xls.content,
+                            file_name=f"pga360_dados_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                except Exception as e:
+                    st.error(f"Erro na exportação: {e}")
+
+    if footer_col3.button("🚪 Sair", use_container_width=True):
+        st.session_state.current_page = "Home"
+        st.rerun()
+
+*** 11 - frontend/views/login_view.py
+
+import streamlit as st
+from supabase import create_client, Client
+import os
+import requests
+
+# Configurações do Supabase extraídas do ambiente
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    st.title("🔒 Acesso ao Sistema PGA-360")
+    st.caption("Gestão Aduaneira Integrada com Inteligência Artificial")
+    
+    aba_login, aba_registro = st.tabs(["Fazer Login", "Solicitar Novo Acesso"])
+
+    # --- TAB 1: LOGIN ---
+    with aba_login:
+        with st.form("form_login"):
+            email = st.text_input("E-mail corporativo")
+            password = st.text_input("Senha", type="password")
+            btn_login = st.form_submit_button("Entrar no Sistema", use_container_width=True)
+
+            if btn_login:
+                try:
+                    # Tenta autenticar no Supabase
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    
+                    # Se logou, guardamos o token JWT e o e-mail na sessão
+                    st.session_state.auth_token = res.session.access_token
+                    st.session_state.user_email = email
+                    
+                    st.success("✅ Autenticação realizada! Carregando ambiente operacional...")
+                    st.rerun()
+                except Exception as e:
+                    st.error("❌ Acesso negado: Verifique seu e-mail, senha ou se seu cadastro já foi aprovado.")
+                    st.info("Dica: Verifique se você confirmou o link enviado para seu e-mail.")
+
+    # --- TAB 2: REGISTRO (CREDENCIAMENTO EM 2 ETAPAS) ---
+    with aba_registro:
+        st.markdown("### Solicitação de Credenciamento")
+        st.write("O acesso ao PGA-360 é restrito e exige validação em duas etapas.")
+        
+        with st.form("form_registro"):
+            new_email = st.text_input("E-mail corporativo (será seu login)")
+            new_password = st.text_input("Crie uma senha forte (mín. 6 caracteres)", type="password")
+            perfil_desejado = st.selectbox(
+                "Nível de acesso solicitado", 
+                ["consulta", "operacional", "diretoria"],
+                help="Sujeito à alteração pelo administrador conforme cargo."
+            )
+            
+            st.divider()
+            btn_reg = st.form_submit_button("🚀 Iniciar Credenciamento", use_container_width=True)
+
+            if btn_reg:
+                if len(new_password) < 6:
+                    st.warning("A senha deve ter no mínimo 6 caracteres.")
+                else:
+                    try:
+                        # ETAPA 1: Registro no Supabase (Dispara e-mail de confirmação automaticamente)
+                        res = supabase.auth.sign_up({"email": new_email, "password": new_password})
+                        
+                        if res.user:
+                            # ETAPA 2: Registro no banco local do PGA-360 via API do Backend
+                            # O usuário é criado com 'is_aprovado = False'
+                            payload = {
+                                "supabase_uid": res.user.id,
+                                "email": new_email,
+                                "perfil": perfil_desejado
+                            }
+                            
+                            reg_res = requests.post(f"{API_URL}/auth/registrar-perfil", json=payload)
+                            
+                            if reg_res.status_code == 200:
+                                st.success("📩 **Etapa 1 concluída com sucesso!**")
+                                st.info(f"""
+                                **Próximos passos:**
+                                1. Acesse o e-mail **{new_email}** e clique no link de confirmação.
+                                2. Após confirmar, a diretoria será notificada para realizar a **Etapa 2 (Aprovação de Perfil)**.
+                                3. Você receberá um aviso assim que o acesso for liberado.
+                                """)
+                                st.balloons()
+                            else:
+                                st.error("Erro ao sincronizar perfil local. Contate a TI.")
+                    except Exception as e:
+                        # Trata erro de e-mail já existente ou outros erros do Supabase
+                        st.error(f"Não foi possível realizar o cadastro: {str(e)}")
+
+    # Rodapé da tela de login
+    st.sidebar.warning("⚠️ Sistema restrito a funcionários autorizados. Todas as consultas são monitoradas via log de auditoria.")
+
+*** 12 - produto_view.py
+
+import streamlit as st
+import requests
+import pandas as pd
+import os
+
+API_URL = os.getenv("API_URL", "http://backend-360:8000")
+
+def render():
+    item_id = st.session_state.selected_item_id
+    di_id = st.session_state.selected_di_id
+    
+    if not item_id:
+        st.warning("Nenhum produto selecionado.")
+        if st.button("Voltar para DI/DUE"):
+            st.session_state.current_page = "di_due"
+            st.rerun()
+        return
+
+    # --- 1. BUSCA DE DADOS ---
+    try:
+        # Busca Capa (para o cabeçalho de contexto)
+        res_di = requests.get(f"{API_URL}/di-due/{di_id}")
+        di = res_di.json() if res_di.status_code == 200 else {}
+
+        # Busca Detalhe do Item
+        res_item = requests.get(f"{API_URL}/produto/{item_id}")
+        if res_item.status_code != 200:
+            st.error("Erro ao carregar detalhes do produto.")
+            return
+        item = res_item.json()
+
+    except Exception as e:
+        st.error(f"Falha de conexão: {e}")
+        return
+
+    # --- 2. TOPO: BOTÃO VOLTAR E CABEÇALHO DE CONTEXTO ---
+    col_v1, col_v2 = st.columns([1, 8])
+    if col_v1.button("⬅️ Voltar"):
+        st.session_state.current_page = "di_due"
+        st.rerun()
+    
+    with st.container(border=True):
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.write(f"**Tipo DI**  \n{di.get('tipo_di')}")
+        c2.write(f"**DI/DUE**  \n{di.get('di_due')}")
+        c3.write(f"**CNPJ Importador**  \n{di.get('cnpj_importador')}")
+        c4.write(f"**Importador**  \n{di.get('importador')}")
+        c5.write(f"**Regime Aduaneiro**  \n{di.get('regime')}")
+        c6.write(f"**Versão**  \n{di.get('versao')}")
+
+    # --- 3. ESTRUTURA DE ABAS PRINCIPAIS ---
+    st.subheader(f"Produto: Seq {item.get('seq_item')} | NCM: {item.get('ncm')}")
+    aba1, aba2, aba3 = st.tabs(["📄 Dados Principais", "🏢 Op. Estrangeiro", "💰 Impostos"])
+
+    # --- CONTEÚDO ABA 1: DADOS PRINCIPAIS ---
+    with aba1:
+        sub_aba1_1, sub_aba1_2 = st.tabs(["Item/Produto", "Negociação Comercial"])
+        
+        with sub_aba1_1:
+            c_a, c_b, c_c, c_d = st.columns(4)
+            c_a.text_input("Seq Item", value=item.get('seq_item'), disabled=True)
+            c_b.text_input("NCM", value=item.get('ncm'), disabled=True)
+            c_c.text_input("ID RFB (Serpro)", value=item.get('id_serpro'), disabled=True)
+            c_d.text_input("ID Importador", value=item.get('id_importador'), disabled=True)
+
+            c_e, c_f, c_g, c_h = st.columns(4)
+            c_e.text_input("Número de Série", value=item.get('serie'), disabled=True)
+            c_f.text_input("Incoterm", value=item.get('incoterm'), disabled=True)
+            c_g.text_input("Qtde Comercial", value=item.get('quantidade_comercial'), disabled=True)
+            c_h.text_input("Unidade Comercial", value=item.get('unidade_medida'), disabled=True)
+
+            c_i, c_j, c_k, c_l = st.columns(4)
+            c_i.text_input("Qtde Estatística", value=item.get('quantidade_estatistica'), disabled=True)
+            c_l.text_input("Unidade Estatística", value=item.get('unidade_estatistica'), disabled=True)
+            c_k.text_input("Peso Líquido Unit.", value=item.get('peso_liquido_unitario'), disabled=True)
+            c_j.text_input("Peso Líquido Total", value=item.get('peso_liquido_total'), disabled=True)
+
+            st.text_input("Denominação", value=item.get('denominacao'), disabled=True)
+            st.text_area("Detalhamento", value=item.get('descricao_mercadoria'), height=100, disabled=True)
+            st.text_area("Descrição Complementar", value=item.get('descricao_complementar'), height=60, disabled=True)
+
+        with sub_aba1_2:
+            # Matriz de Negociação (Requisito 4.3.1.2)
+            t_dolar = float(di.get('taxa_dolar') or 1)
+            t_real = float(di.get('taxa_real') or 1) # Assumindo taxa_real no modelo ou calculada
+            q_com = float(item.get('quantidade_comercial') or 0)
+            
+            data_neg = [
+                ["Produto", item.get('moeda_fob'), item.get('valor_unitario'), item.get('total_na_moeda'), 
+                 float(item.get('valor_unitario')) * t_dolar, float(item.get('total_na_moeda')) * t_dolar,
+                 float(item.get('valor_unitario')) * t_real, float(item.get('total_na_moeda')) * t_real],
+                
+                ["Frete", "USD", item.get('valor_frete'), float(item.get('valor_frete')) * q_com,
+                 float(item.get('valor_frete')) * t_dolar, (float(item.get('valor_frete')) * q_com) * t_dolar,
+                 float(item.get('valor_frete')) * t_real, (float(item.get('valor_frete')) * q_com) * t_real],
+                
+                ["Seguro", "USD", item.get('valor_seguro'), float(item.get('valor_seguro')) * q_com,
+                 float(item.get('valor_seguro')) * t_dolar, (float(item.get('valor_seguro')) * q_com) * t_dolar,
+                 float(item.get('valor_seguro')) * t_real, (float(item.get('valor_seguro')) * q_com) * t_real]
+            ]
+            df_neg = pd.DataFrame(data_neg, columns=["Rubrica", "Moeda", "Unit. Negoc.", "Total Negoc.", "Unit. Dólar", "Total Dólar", "Unit. Real", "Total Real"])
+            st.table(df_neg)
+
+    # --- CONTEÚDO ABA 2: OP. ESTRANGEIRO ---
+    with aba2:
+        st.subheader("Dados do Operador")
+        st.text_input("Denominação do Produto (Ref)", value=item.get('denominacao'), disabled=True)
+        st.text_area("Detalhamento Técnico (Ref)", value=item.get('descricao_mercadoria'), disabled=True)
+        
+        st.divider()
+        # Matriz de Fornecedor/Fabricante (Requisito 4.3.2)
+        data_ops = [
+            ["Fornecedor", item.get('op_estrang_fornec'), item.get('op_estrang_ende_fornec'), item.get('op_estrang_pais_origem'), item.get('op_estrang_vinc_impo_expo')],
+            ["Fabricante", item.get('op_estrang_fabricante'), item.get('op_estrang_ende_fabric'), item.get('op_estrang_pais_origem'), item.get('op_estrang_vinc_impo_expo')]
+        ]
+        df_ops = pd.DataFrame(data_ops, columns=["Tipo Operador", "Nome Operador", "Endereço", "País Origem", "Vínculo Imp/Exp"])
+        st.table(df_ops)
+
+    # --- CONTEÚDO ABA 3: IMPOSTOS ---
+    with aba3:
+        st.subheader("Tributação por Item")
+        sub_aba3_1, sub_aba3_2 = st.tabs(["Impostos", "Serviços"])
+        
+        with sub_aba3_1:
+            # Matriz de Impostos do Item (Requisito 4.3.3.1)
+            data_imp_item = [
+                ["II", item.get('base_calc_ii'), f"{item.get('percentual_ii')}%", item.get('valor_ii'), item.get('valor_ii_devido'), item.get('valor_ii_recolher')],
+                ["IPI", item.get('base_calc_ipi'), f"{item.get('percentual_ipi')}%", item.get('valor_ipi'), item.get('valor_ipi_devido'), item.get('valor_ipi_recolher')],
+                ["PIS", item.get('base_calc_pis'), f"{item.get('percentual_pis')}%", item.get('valor_pis'), item.get('valor_pis_devido'), item.get('valor_pis_recolher')],
+                ["COFINS", item.get('base_calc_cofins'), f"{item.get('percentual_cofins')}%", item.get('valor_cofins'), item.get('valor_ii_devido'), item.get('valor_ii_recolher')] # Usando II como ref se COFINS nulo
+            ]
+            df_imp_item = pd.DataFrame(data_imp_item, columns=["Tributo", "Base Cálculo", "Aliquota", "Calculado", "Devido", "A Recolher"])
+            st.table(df_imp_item)
+            
+        with sub_aba3_2:
+            st.info("ℹ️ Informação de serviços não disponível no momento.")
