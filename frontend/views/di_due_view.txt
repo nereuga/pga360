@@ -12,30 +12,34 @@ def render():
     
     if not di_id:
         st.warning("⚠️ Nenhum processo selecionado.")
+        if st.button("Voltar para Lista"):
+            st.session_state.current_page = "Importacao"
+            st.rerun()
         return
 
+    # --- 1. BUSCA DE DADOS ---
     try:
         res_di = requests.get(f"{API_URL}/di-due/{di_id}", headers=headers)
+        if res_di.status_code != 200:
+            st.error("Erro ao carregar detalhes da DI.")
+            return
         di = res_di.json()
+
         res_itens = requests.get(f"{API_URL}/di-due/{di_id}/produtos", headers=headers)
         itens_raw = res_itens.json() if res_itens.status_code == 200 else []
         df_itens = pd.DataFrame(itens_raw)
 
-        # --- BLINDAGEM DE DADOS: Conversão e Garantia de Colunas ---
-        cols_financeiras = [
-            'ref_valor_fob', 'valor_frete', 'valor_seguro', 'taxa_negociada',
-            'base_calc_ii', 'valor_ii', 'base_calc_ipi', 'valor_ipi',
-            'base_calc_pis', 'valor_pis', 'base_calc_cofins', 'valor_cofins'
-        ]
-        
-        if df_itens.empty:
-            df_itens = pd.DataFrame(columns=['moeda_fob'] + cols_financeiras)
-        else:
-            # Garante que todas as colunas de cálculo existam (se não existirem, cria com 0)
-            for col in cols_financeiras:
-                if col not in df_itens.columns:
-                    df_itens[col] = 0.0
-                df_itens[col] = pd.to_numeric(df_itens[col], errors='coerce').fillna(0.0)
+        # --- CORREÇÃO CRÍTICA: Conversão de tipos para evitar TypeError ---
+        if not df_itens.empty:
+            cols_numericas = [
+                'ref_valor_fob', 'valor_frete', 'valor_seguro', 
+                'taxa_negociada', 'base_calc_ii', 'valor_ii', 
+                'base_calc_ipi', 'valor_ipi', 'base_calc_pis', 
+                'valor_pis', 'base_calc_cofins', 'valor_cofins'
+            ]
+            for col in cols_numericas:
+                if col in df_itens.columns:
+                    df_itens[col] = pd.to_numeric(df_itens[col], errors='coerce').fillna(0.0)
 
         res_taxas = requests.get(f"{API_URL}/di-due/{di_id}/taxas-moedas", headers=headers)
         taxas_negociadas = res_taxas.json() if res_taxas.status_code == 200 else []
@@ -60,8 +64,10 @@ def render():
 
     aba_principal_1, aba_principal_2, aba_principal_3 = st.tabs(["📄 DI/DUIMP", "📊 Resumo Importação", "📦 Produtos"])
 
+    # --- ABA 1: DI/DUIMP ---
     with aba_principal_1:
         s1, s2, s3 = st.tabs(["Dados Principais", "Dados de Carga", "Tipos Embalagem"])
+        
         with s1:
             ca, cb, cc = st.columns(3)
             ca.text_input("Endereço", value=di.get('endereco_importador') or "", disabled=True)
@@ -69,11 +75,9 @@ def render():
             cc.text_input("Regime Aduaneiro", value=di.get('regime') or "", disabled=True)
             
             cd, ce, cf = st.columns(3)
-            def format_dt(x):
-                try: return datetime.strptime(x, "%Y-%m-%d").date() if x else None
-                except: return None
-            cd.date_input("Data Embarque (ATD)", value=format_dt(di.get('data_atd')), disabled=True)
-            ce.date_input("Data Chegada (ATA)", value=format_dt(di.get('data_ata')), disabled=True)
+            def format_dt(x): return datetime.strptime(x, "%Y-%m-%d").date() if x else None
+            cd.date_input("Data Embarque", value=format_dt(di.get('data_atd')), disabled=True)
+            ce.date_input("Data Chegada", value=format_dt(di.get('data_ata')), disabled=True)
             cf.date_input("Data Sistema", value=format_dt(di.get('data_no_sistema')), disabled=True)
             
             cg, ch = st.columns(2)
@@ -99,54 +103,91 @@ def render():
             cs.text_input("País Embarque", value=di.get('pais_procedencia') or "", disabled=True)
             ct.text_input("Local Embarque", value=di.get('local_embarque') or "", disabled=True)
             
+            # --- CORREÇÃO PESOS: Agora dentro do formulário e com fonte padrão ---
             cu, cv = st.columns(2)
-            cu.text_input("Peso Bruto (KG)", value=f"{float(di.get('peso_bruto') or 0):,.3f}", disabled=True)
-            cv.text_input("Peso Líquido (KG)", value=f"{float(di.get('peso_liquido') or 0):,.3f}", disabled=True)
+            val_pb = f"{float(di.get('peso_bruto') or 0):,.3f}"
+            val_pl = f"{float(di.get('peso_liquido') or 0):,.3f}"
+            cu.text_input("Peso Bruto (KG)", value=val_pb, disabled=True)
+            cv.text_input("Peso Líquido (KG)", value=val_pl, disabled=True)
 
         with s3:
             st.text_input("Quantidade de Embalagens", value=str(di.get('tipos_embalagem') or 0), disabled=True)
 
+    # --- ABA 2: RESUMO IMPORTAÇÃO ---
     with aba_principal_2:
         sub1, sub2 = st.tabs(["Taxas Cambiais", "Resumo Comercial"])
+        
         with sub1:
             cx1, cx2 = st.columns(2)
             cx1.text_input("Data Conversão", value=di.get('data_registro') or "", disabled=True)
             cx2.text_input("Taxa Dólar", value=f"{float(di.get('taxa_dolar') or 0):,.4f}", disabled=True)
+            
+            st.markdown("**Moedas e Taxas Negociadas (Distinct):**")
             if taxas_negociadas:
                 st.dataframe(pd.DataFrame(taxas_negociadas), hide_index=True, use_container_width=True)
+            else:
+                st.info("Nenhuma taxa negociada encontrada.")
 
         with sub2:
             rc1, rc2, rc3, rc4 = st.columns(4)
             rc1.text_input("Tipo Docto", value=di.get('tipo_di') or "", disabled=True)
             rc2.text_input("DI/DUIMP", value=di.get('di_due') or "", disabled=True)
             rc3.text_input("Regime", value=di.get('regime') or "", disabled=True)
-            rc4.text_input("Incoterm", value=di.get('incoterm') or "", disabled=True)
+            rc4.text_input("Incoterm", value="", disabled=True)
             
             v_com, impo = st.tabs(["Valores Comerciais", "Impostos"])
+            
             with v_com:
-                def calc_v(df, col, label):
-                    return df.groupby('moeda_fob').apply(lambda x: pd.Series({
-                        'Rubrica': label, 'Moeda Negociada': x.name,
-                        'Total Negociado': x[col].sum(),
-                        'Total Real': (x[col] * x['taxa_negociada']).sum()
-                    })).reset_index(drop=True)
-                
-                res_com = pd.concat([calc_v(df_itens, 'ref_valor_fob', 'Produto'),
-                                   calc_v(df_itens, 'valor_frete', 'Frete'),
-                                   calc_v(df_itens, 'valor_seguro', 'Seguro')])
-                st.dataframe(res_com, hide_index=True, use_container_width=True)
+                if not df_itens.empty:
+                    taxa_capa = float(di.get('taxa_dolar') or 1.0)
+                    
+                    def agrupar_valores(df, col_v, label):
+                        # Agrupamento robusto tratando nulos e tipos
+                        temp = df.groupby('moeda_fob').apply(lambda x: pd.Series({
+                            'Rubrica': label,
+                            'Moeda Negociada': x.name,
+                            'Total Negociado': x[col_v].sum(),
+                            'Total Real': (x[col_v] * x['taxa_negociada']).sum()
+                        })).reset_index(drop=True)
+                        return temp
+
+                    df_p = agrupar_valores(df_itens, 'ref_valor_fob', 'Produto')
+                    df_f = agrupar_valores(df_itens, 'valor_frete', 'Frete')
+                    df_s = agrupar_valores(df_itens, 'valor_seguro', 'Seguro')
+                    
+                    res_comercial = pd.concat([df_p, df_f, df_s]).reset_index(drop=True)
+                    st.dataframe(res_comercial, hide_index=True, use_container_width=True)
+                else:
+                    st.info("Sem dados de itens para calcular valores.")
 
             with impo:
-                imp_data = []
-                for t, b, v in [('II','base_calc_ii','valor_ii'),('IPI','base_calc_ipi','valor_ipi'),
-                                ('PIS','base_calc_pis','valor_pis'),('COFINS','base_calc_cofins','valor_cofins')]:
-                    imp_data.append({"Tributo": t, "Base Cálculo": df_itens[b].sum(), "Calculado": df_itens[v].sum()})
-                st.dataframe(pd.DataFrame(imp_data), hide_index=True, use_container_width=True)
+                if not df_itens.empty:
+                    imp_list = []
+                    for tributo, base, valor in [('II', 'base_calc_ii', 'valor_ii'), 
+                                                ('IPI', 'base_calc_ipi', 'valor_ipi'),
+                                                ('PIS', 'base_calc_pis', 'valor_pis'),
+                                                ('COFINS', 'base_calc_cofins', 'valor_cofins')]:
+                        imp_list.append({
+                            "Tributo": tributo,
+                            "Base Cálculo": df_itens[base].sum() if base in df_itens.columns else 0,
+                            "Calculado": df_itens[valor].sum() if valor in df_itens.columns else 0
+                        })
+                    st.dataframe(pd.DataFrame(imp_list), hide_index=True, use_container_width=True)
 
+    # --- ABA 3: PRODUTOS ---
     with aba_principal_3:
-        col_m = {"seq_item": "SEQ ITEM", "ncm": "NCM", "id_serpro": "ID RFB", 
-                 "id_importador": "ID Importador", "descricao_mercadoria": "Detalhamento"}
-        df_p = df_itens.copy()
-        for c in col_m.keys():
-            if c not in df_p.columns: df_p[c] = "-"
-        st.dataframe(df_p[list(col_m.keys())].rename(columns=col_m), hide_index=True, use_container_width=True)
+        if not df_itens.empty:
+            df_prod = df_itens.copy()
+            col_map = {
+                "seq_item": "SEQ ITEM", "ncm": "NCM",
+                "id_serpro": "ID RFB", "id_importador": "ID Importador",
+                "descricao_mercadoria": "Detalhamento"
+            }
+            # Garante colunas antes de filtrar
+            for c in col_map.keys():
+                if c not in df_prod.columns: df_prod[c] = "-"
+            
+            df_final = df_prod[list(col_map.keys())].rename(columns=col_map)
+            st.dataframe(df_final, hide_index=True, use_container_width=True)
+        else:
+            st.info("Nenhum produto encontrado.")

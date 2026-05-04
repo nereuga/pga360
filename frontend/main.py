@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from PIL import Image
-# Importação de todas as views, incluindo a nova Biblioteca
+# Importação de todas as views
 from views import (
     login_view, 
     importacao_view, 
@@ -18,7 +18,45 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. Inicialização de Estados Globais (Contexto de Sessão)
+# --- 5. ESTILIZAÇÃO CUSTOMIZADA (CSS) ---
+# Aqui definimos o Azul Marinho para a Sidebar e ajustamos as cores dos textos/botões
+# Caso o tom de azul do logo seja diferente, basta ajustar o código Hexadecimal #002147
+st.markdown("""
+    <style>
+        /* Cor de fundo da Sidebar */
+        [data-testid="stSidebar"] {
+            background-color: #002147;
+        }
+
+        /* Cor dos textos e ícones na Sidebar */
+        [data-testid="stSidebar"] .stMarkdown, 
+        [data-testid="stSidebar"] p, 
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] h3 {
+            color: white !important;
+        }
+
+        /* Estilização dos botões da Sidebar para combinar com o fundo escuro */
+        [data-testid="stSidebar"] .stButton > button {
+            background-color: transparent;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        [data-testid="stSidebar"] .stButton > button:hover {
+            border-color: white;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        /* Ajuste do Divider na Sidebar */
+        [data-testid="stSidebar"] hr {
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# 2. Inicialização de Estados Globais (MANTIDO)
 if "auth_token" not in st.session_state:
     st.session_state.auth_token = None
 if "current_page" not in st.session_state:
@@ -26,14 +64,13 @@ if "current_page" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "pending_question" not in st.session_state:
-    st.session_state.pending_question = None # Para reuso da Biblioteca de Insights
+    st.session_state.pending_question = None
 
 # 3. Função da Sidebar (Painel de Navegação Lateral)
 def render_sidebar():
     with st.sidebar:
         # Logo Centralizado
         try:
-            # Pasta assets deve existir no diretório frontend
             logo = Image.open("assets/logo_pga360_neg.png")
             st.image(logo, use_column_width=True)
         except:
@@ -70,7 +107,6 @@ def render_sidebar():
         if st.session_state.auth_token:
             st.caption(f"Logado como: {st.session_state.get('user_email', 'Usuário')}")
             if st.button("🚪 Sair do Sistema", use_container_width=True):
-                # Limpa todo o estado para segurança
                 st.session_state.auth_token = None
                 st.session_state.chat_history = []
                 st.session_state.current_page = "Home"
@@ -79,14 +115,14 @@ def render_sidebar():
 # 4. Controle de Fluxo (Roteamento de Páginas)
 def main():
     if st.session_state.auth_token is None:
-        # ETAPA 1: Autenticação Supabase
         login_view.render()
     else:
-        # ETAPA 2: Acesso ao Sistema Operacional
         render_sidebar()
         page = st.session_state.current_page
         
         if page == "Home":
+            # Aqui você pode optar por usar o seu home_view.render() 
+            # ou manter o markdown abaixo que já estava no seu main.py
             st.title("Bem-vindo ao PGA-360")
             st.info("Utilize o menu lateral para gerenciar as operações ou consultar a inteligência de dados.")
             st.markdown("""

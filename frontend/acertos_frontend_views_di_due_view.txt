@@ -1,0 +1,132 @@
+Arquivo frontend/views/di_due.py
+
+Deveria mostrar um Cabeçalho com as colunas Tipo DI, DI/DUE, CNPJ, Importador, Regime e Versão.
+
+Deveria Apresentar uma tabela com as Abas: "DI/DUIMP", "Resumo Importação" e "Produtos"
+
+### Aba "DI/DIMP"
+
+***Essa aba deveria exibir uma tabela aninhada contendo 3 Abas sendo: "Dados principais", "Dados de Carga" e "Tipo Embalagem".
+
+** A Aba "Dados Principais" deveria apresentar um formulário somente exibição com as colunas:
+- Endereço (coluna do banco: di_due.endereco_importador), 
+- Canal (coluna do banco: di_due.canal),
+- Regime Aduaneiro (coluna do banco: di_due.regime),
+- Data Embarque (coluna do banco: di_due.data_atd),
+- Data Chegada (coluna do banco: di_due.data_ata),
+- Data Sistema (coluna do banco: di_due.data_no_sistema),
+- Data Registro (coluna do banco: di_due.data_registro), 
+- Data desembaraço (coluna do banco: di_due.data_desembaraco)
+
+** A Aba "Dados de Carga" deveria apresentar um formulário somente exibição com as colunas:
+- RCR  (coluna do banco: di_due.rcr),
+- Unidade Entrada (coluna do banco: di_due.urf_entrada),
+- Unidade Despacho (coluna do banco: di_due.unidade_despacho),
+- Unidade Desembaraço (coluna do banco: di_due.unidade_despacho),
+- Recinto Alfandegado (coluna do banco: di_due.recinto),
+- Situacao Despacho (Em branco),
+- Bandeira (coluna do banco: di_due.bandeira),
+- Tipo Ident. Carga (Em branco),
+- Numero Master (coluna do banco: di_due.awb_master),
+- Numero House (coluna do banco: di_due.awb_house),
+- Pais Embarque/Procedencia (coluna do banco: di_due.pais_procedencia),
+- Local Embarque (coluna do banco: di_due.local_embarque),
+- Peso Bruto (coluna do banco: di_due.peso_bruto),
+- Peso Líquido (coluna do banco: di_due.peso_liquido),
+
+** A Aba "Tipo de Embalagem" deveria apresentar um formulário com apenas uma coluna:
+- Quantidade de Embalagens  (coluna do banco: di_due.tipos_embalagem)
+
+### Aba "Resumo Importação"
+
+*** Essa Aba deveria exibir uma tabela aninhada contendo 2 Abas sendo: "Taxas Cambiais" e "Resumo Comercial"
+
+** A Aba "Taxas Cambiais" deveria exibir um formulário somente exibição com as colunas:
+- Data Conversão  (coluna do banco: di_due.data_registro),
+- Taxa Dolar  (coluna do banco: di_due.taxa_dolar)
+Essa Aba também exibe abaixo do formulário acima uma lista duas que devem ser buscadas na tabela item_di_due com um SELECT "Distinct" de todas:
+- Moedas Negociadas (Coluna item_di_due.moeda_fob) 
+- Taxas Negociadas (Coluna item_di_due.taxa_negociada)
+
+** Aba "Resumo Comercial" deveria exibir um formulário somente exibição com as colunas:
+- Tipo Docto (coluna do banco: di_due.tipo_di)
+- DI/DUIMP (coluna do banco: di_due.di_due)
+- Regime  (coluna do banco: di_due.regime)
+- Incoterm (Em branco)
+Essa Aba também exibe abaixo do formulário acima, uma tabela aninhada com duas Abas sendo: "Valores Comerciais" e "impostos"
+
+* A Aba "Valores Comerciais" deveria apresentar uma lista resultado de uma busca na tabela item_di_due da seguinte forma:
+
+Os labels das colunas serão: "Rubrica","Moeda Negociada","Total Negociado" e "Total Real"
+O SQL de busca deverá ser esse abaixo ou uma versão mais eficiente.
+
+select 'Produto' as rubrica, item_di_due.moeda_fob as moeda_negociada, 
+sum( item_di_due.ref_valor_fob * di_due.taxa_dolar) as total_dolar,
+sum((item_di_due.ref_valor_fob  * item_di_due.taxa_negociada )) as total_real
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id
+group by item_di_due.di_duimp_id, item_di_due.moeda_fob
+union 
+select 'Frete' as rubrica, moeda_fob  as moeda_negociada, 
+sum(item_di_due.valor_frete  * di_due.taxa_dolar) as total_dolar, 
+sum((item_di_due.valor_frete * item_di_due.taxa_negociada )) as total_real
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id 
+group by item_di_due.di_duimp_id, item_di_due.moeda_fob
+union 
+select 'Seguro' as rubrica, moeda_fob  as moeda_negociada, 
+sum(item_di_due.valor_seguro  * di_due.taxa_dolar ) as total_dolar, 
+sum((item_di_due.valor_seguro * item_di_due.taxa_negociada )) as total_real
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id
+group by item_di_due.di_duimp_id, item_di_due.moeda_fob
+;
+
+* Aba "Impostos" deveria apresentar uma lista resultado de uma busca na tabela item_di_due da seguinte forma:
+Os Labes das colunas serão: "Tributo", "Base Calculo" e "Calculado"
+O SQL de busca deverá ser esse abaixo ou uma versão mais eficiente.
+select 'II' as tributo,
+sum( item_di_due.base_calc_ii ) as base_calculo,
+sum(item_di_due.valor_ii) as calculado
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id
+group by item_di_due.di_duimp_id
+union 
+select 'IPI' as tributo,
+sum( item_di_due.base_calc_ipi ) as base_calculo,
+sum(item_di_due.valor_ipi) as calculado
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id
+group by item_di_due.di_duimp_id
+union 
+select 'PIS' as tributo,
+sum( item_di_due.base_calc_pis ) as base_calculo,
+sum(item_di_due.valor_pis) as calculado
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id
+group by item_di_due.di_duimp_id
+union
+select 'COFINS' as tributo,
+sum( item_di_due.base_calc_cofins ) as base_calculo,
+sum(item_di_due.valor_cofins) as calculado
+from  item_di_due , di_due
+where item_di_due.di_duimp_id = 212
+and di_due.id = item_di_due.di_duimp_id
+group by item_di_due.di_duimp_id
+;
+
+### Aba "Produtos" 
+Essa Aba deveria apresentar uma Lista dos itens da di_due escolhida com as colunas:
+- SEQ ITEM (coluna do banco: item_di_due.seq_item)
+- NCM  (coluna do banco: di_due.ncm)
+- ID RFB  (coluna do banco: di_due.id_serpro)
+- ID Importador  (coluna do banco: di_due.id_importador)
+- Detalhamento  (coluna do banco: di_due.descricao_mercadoria)
+
+
